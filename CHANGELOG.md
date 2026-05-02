@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 1.0.1
+
+* Tiny tweaks
+
 ## 1.0.0
 
 ### **Breaking changes**

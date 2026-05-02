@@ -32,7 +32,7 @@ final class DesktopLoginStrategy implements IDesktopLoginStrategy {
 
   @override
   Future<Client?> login({required DesktopConfig platformConfig, required ClientConfig clientConfig}) async {
-    final loopback = Uri.parse(platformConfig.loopbackUri ?? platformConfig.redirectUri);
+    final loopback = Uri.parse(platformConfig.loopbackUri);
     final host = loopback.host.isEmpty ? InternetAddress.loopbackIPv4.address : loopback.host;
     final port = loopback.port == 0 ? 8765 : loopback.port;
     final expectedPath = loopback.path.isEmpty ? '/' : loopback.path;

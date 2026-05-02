@@ -75,11 +75,6 @@ final client = KeycloakClient(
     baseUrl: 'https://auth.example.com',
     realm: 'my-realm',
     clientId: 'my-client',
-    scopes: const ['openid', 'profile', 'email'],
-    logLevel: LogLevel.info,
-    desktop: const DesktopConfig(),
-    mobile: const MobileConfig(),
-    web: const WebConfig(),
   ),
 );
 ```
@@ -105,9 +100,6 @@ For desktop, these two values have different jobs:
 - `DesktopConfig.redirectUri`: the URI sent to Keycloak
 - `DesktopConfig.loopbackUri`: the local URI the desktop app listens on
 
-If `loopbackUri` is `null`, the local desktop listener binds directly to
-`redirectUri`.
-
 ## Dev Redirect Helper
 
 Recent Keycloak versions can be awkward about using `localhost` as an allowed redirect URI. To make local development easier, this package ships with a public redirect endpoint by default:
@@ -120,71 +112,8 @@ The idea is:
 2. Use that public URL as `DesktopConfig.redirectUri` during desktop dev.
 3. Keep `DesktopConfig.loopbackUri` on a local address such as `http://localhost:8765/callback`.
 4. Keycloak redirects the browser to the public helper page after login.
-5. That page lets the user enter their local port.
+5. That page lets the you enter your loopback uri.
 6. The page forwards the full callback, including Keycloak query parameters, to the local loopback server.
-
-This is especially convenient for:
-
-- desktop development, where your app is listening on a local loopback URL
-- web development, where you want a simple public callback during local work
-
-Desktop default dev setup:
-
-```dart
-final client = KeycloakClient(
-  config: ClientConfig(
-    baseUrl: 'https://auth.example.com',
-    realm: 'my-realm',
-    clientId: 'my-client',
-    desktop: const DesktopConfig(
-      redirectUri: 'https://winchetechnologies.co.uk/tools/oauth_redirect',
-      loopbackUri: 'http://localhost:8765/callback',
-    ),
-  ),
-);
-```
-
-This desktop split is intentional:
-
-- `redirectUri` bypasses Keycloak's localhost restriction
-- `loopbackUri` is where the desktop app actually receives the callback
-
-Web default dev setup:
-
-```dart
-final client = KeycloakClient(
-  config: ClientConfig(
-    baseUrl: 'https://auth.example.com',
-    realm: 'my-realm',
-    clientId: 'my-client',
-    web: const WebConfig(
-      redirectUri: 'https://winchetechnologies.co.uk/tools/oauth_redirect',
-    ),
-  ),
-);
-```
-
-If you already have your own public callback page, you can replace these defaults with your own URLs.
-
-If you are using a real endpoint and do not need the localhost workaround,
-prefer setting `loopbackUri` to `null`. In that case, the desktop strategy
-binds the local loopback server to `redirectUri` itself.
-
-Example:
-
-```dart
-final client = KeycloakClient(
-  config: ClientConfig(
-    baseUrl: 'https://auth.example.com',
-    realm: 'my-realm',
-    clientId: 'my-client',
-    desktop: const DesktopConfig(
-      redirectUri: 'https://your-domain.example.com/auth/callback',
-      loopbackUri: null,
-    ),
-  ),
-);
-```
 
 ## Web Startup
 
@@ -268,8 +197,6 @@ Add the deep-link intent filter to your `MainActivity` in `android/app/src/main/
 </activity>
 ```
 
-Do not register `net.openid.appauth.RedirectUriReceiverActivity` unless your app is actually using AppAuth. This package uses `app_links` for mobile deep-link callbacks, so the redirect should reopen your app activity directly.
-
 Also ensure internet permission exists:
 
 ```xml
@@ -309,26 +236,14 @@ Desktop login uses a system browser plus a local HTTP listener.
 Important fields:
 
 - `DesktopConfig.redirectUri`: the redirect URI sent to Keycloak
-- `DesktopConfig.loopbackUri`: optional separate local listener URI
+- `DesktopConfig.loopbackUri`: the local URI the desktop app listens on (default: `http://localhost:8765/callback`)
 - `DesktopConfig.loopbackTimeout`: how long to wait for the callback
 
-Behavior:
-
-- if `loopbackUri` is set, the app listens on `loopbackUri` while Keycloak uses `redirectUri`
-- if `loopbackUri` is `null`, the app listens directly on `redirectUri`
-
-For local development, the easiest setup is:
+The app always listens on `loopbackUri` while Keycloak redirects to `redirectUri`. For local development:
 
 - register `https://winchetechnologies.co.uk/tools/oauth_redirect` in Keycloak
 - keep `loopbackUri` on a local port like `http://localhost:8765/callback`
 - when the helper page opens, enter that local port so it forwards the callback back to your app
-
-For real endpoint setups, prefer:
-
-- `redirectUri`: your real callback URL
-- `loopbackUri: null`
-
-That avoids splitting the two values when you do not need the localhost workaround.
 
 ## Web
 

@@ -43,13 +43,7 @@ final class MobileConfig extends PlatformConfig {
 final class DesktopConfig extends PlatformConfig {
   /// The local callback URL that the desktop listener expects after the
   /// browser flow returns to the app.
-  /// 
-  /// If no loopback URI is provided, the redirect URI will be used.
-  /// 
-  /// You can use this to specify a different URI for the loopback listener 
-  /// if needed, but it should generally be a localhost URL that the app can 
-  /// listen on, such as the default `http://localhost:8765/callback`.
-  final String? loopbackUri;
+  final String loopbackUri;
 
   /// The HTML page shown to the user after a successful login. This should
   /// include instructions to return to the app, since the browser is now
