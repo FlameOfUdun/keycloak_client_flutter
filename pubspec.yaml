@@ -1,6 +1,6 @@
 name: keycloak_client
 description: A Flutter package for Keycloak authentication using the Authorization Code flow.
-version: 0.0.1
+version: 1.0.0
 repository: https://github.com/FlameOfUdun/keycloak_client_flutter
 issue_tracker: https://github.com/FlameOfUdun/keycloak_client_flutter/issues
 
@@ -13,10 +13,13 @@ dependencies:
     sdk: flutter
 
   logger: ^2.7.0
-  dio: ^5.8.0+1
-  flutter_secure_storage: ^9.2.4
-  flutter_web_auth_2: ^5.0.1
+  dio: ^5.9.2
+  flutter_secure_storage: ^10.0.0
+  oauth2: ^2.0.5
   crypto: ^3.0.6
+  url_launcher: ^6.3.2
+  web: ^1.1.1
+  app_links: ^7.0.0
 
 dev_dependencies:
   flutter_test:

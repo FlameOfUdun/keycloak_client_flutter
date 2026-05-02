@@ -12,14 +12,16 @@ A minimal Flutter app demonstrating the `keycloak_client` package.
 
 ## How to configure
 
-Before running, open `lib/main.dart` and replace the four placeholder values in the `KeycloakClient` constructor with your own Keycloak server details:
+Before running, open `lib/main.dart` and replace the four placeholder values in `KeycloakClientConfig` with your own Keycloak server details:
 
 ```dart
 final client = KeycloakClient(
-  baseUrl: 'https://your-keycloak-server.com',
-  clientId: 'your-client-id',
-  realm: 'your-realm',
-  redirectUri: 'yourapp://auth/callback',
+  config: KeycloakClientConfig(
+    baseUrl: 'your-keycloak-server',
+    clientId: 'your-client-id',
+    realm: 'your-realm',
+    redirectUri: 'yourapp://auth/callback',
+  ),
 );
 ```
 

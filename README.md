@@ -1,50 +1,39 @@
 # keycloak_client
 
-A Flutter package for Keycloak authentication. Handles login, token refresh, session persistence, and user profile — so you don't have to.
+Cross-platform Keycloak authentication for Flutter with:
 
-[![pub package](https://img.shields.io/pub/v/keycloak_client.svg)](https://pub.dev/packages/keycloak_client)
-[![pub points](https://img.shields.io/pub/points/keycloak_client)](https://pub.dev/packages/keycloak_client/score)
-[![popularity](https://img.shields.io/pub/popularity/keycloak_client)](https://pub.dev/packages/keycloak_client/score)
+- Authorization Code + PKCE
+- mobile deep links
+- desktop loopback callbacks
+- web redirect callbacks
+- secure credential persistence
+- automatic token refresh
+- auth and user streams
 
----
-
-## Features
-
-- **Browser login** — full Authorization Code flow via the system browser
-- **Automatic token refresh** — silently refreshes access tokens before they expire
-- **Persistent sessions** — credentials stored securely via `flutter_secure_storage`
-- **Reactive auth state** — `Stream<AuthState>` for signed-in / signed-out / session-expired / unknown
-- **Reactive user profile** — `Stream<UserInfo?>` that updates whenever user data changes
-- **On-demand tokens** — `getAuthToken()` returns a fresh token, refreshing automatically if needed
-- **Typed exceptions** — `KeycloakNetworkException`, `KeycloakServerException`, `KeycloakSessionExpiredException` — no raw `DioException` leaks
-- **Configurable logging** — from silent to trace-level with structured output
-
----
-
-## Installation
-
-Add to your `pubspec.yaml`:
+## Install
 
 ```yaml
 dependencies:
-  keycloak_client: ^0.0.1
+  keycloak_client: ^1.0.0
 ```
 
----
-
-## Setup
-
-Create a single `KeycloakClient` instance for your app and call `initialize()` early (e.g. in `initState` or your DI setup). `initialize()` is non-blocking — it restores any persisted session in the background.
+## Quick Start
 
 ```dart
-final client = KeycloakClient(
-  baseUrl: 'https://auth.example.com',              // Keycloak server URL
-  realm: 'my-realm',                                // Keycloak realm name
-  clientId: 'my-app',                               // Client ID registered in Keycloak
-  redirectUri: 'myapp://auth',                      // Redirect URI registered in Keycloak
-  scopes: const ['openid', 'email', 'profile'],     // Optional — these are the defaults
-);
+import 'package:keycloak_client/keycloak_client.dart';
 
+final client = KeycloakClient(
+  config: ClientConfig(
+    baseUrl: 'https://auth.example.com',
+    realm: 'my-realm',
+    clientId: 'my-client',
+  ),
+);
+```
+
+Initialize early:
+
+```dart
 @override
 void initState() {
   super.initState();
@@ -58,41 +47,249 @@ void dispose() {
 }
 ```
 
-> **Redirect URI**: Must be registered in your Keycloak client settings. The scheme (e.g. `myapp`) must also be registered as a custom URL scheme on each platform — see **Platform setup** below.
+Login:
 
----
+```dart
+await client.login();
+```
 
-## Platform setup
+Logout:
 
-`login()` uses the system browser via `flutter_web_auth_2`. You must register your redirect URI scheme on each platform before it will work.
+```dart
+await client.logout();
+```
 
-### Android
+Get a valid access token:
 
-Add a `CallbackActivity` to `android/app/src/main/AndroidManifest.xml` inside `<application>`:
+```dart
+final token = await client.getAuthToken();
+```
+
+## Configuration
+
+Everything is configured through `ClientConfig`.
+
+```dart
+final client = KeycloakClient(
+  config: ClientConfig(
+    baseUrl: 'https://auth.example.com',
+    realm: 'my-realm',
+    clientId: 'my-client',
+    scopes: const ['openid', 'profile', 'email'],
+    logLevel: LogLevel.info,
+    desktop: const DesktopConfig(),
+    mobile: const MobileConfig(),
+    web: const WebConfig(),
+  ),
+);
+```
+
+Main fields:
+
+- `baseUrl`: Keycloak server root
+- `realm`: Keycloak realm name
+- `clientId`: OAuth client ID
+- `clientSecret`: for confidential clients only
+- `scopes`: defaults to `openid`, `email`, `profile`
+- `logLevel`: package logging verbosity
+
+Platform config defaults:
+
+- `MobileConfig.redirectUri`: `myapp://auth`
+- `DesktopConfig.redirectUri`: `https://winchetechnologies.co.uk/tools/oauth_redirect`
+- `DesktopConfig.loopbackUri`: `http://localhost:8765/callback`
+- `WebConfig.redirectUri`: `https://winchetechnologies.co.uk/tools/oauth_redirect`
+
+For desktop, these two values have different jobs:
+
+- `DesktopConfig.redirectUri`: the URI sent to Keycloak
+- `DesktopConfig.loopbackUri`: the local URI the desktop app listens on
+
+If `loopbackUri` is `null`, the local desktop listener binds directly to
+`redirectUri`.
+
+## Dev Redirect Helper
+
+Recent Keycloak versions can be awkward about using `localhost` as an allowed redirect URI. To make local development easier, this package ships with a public redirect endpoint by default:
+
+`https://winchetechnologies.co.uk/tools/oauth_redirect`
+
+The idea is:
+
+1. Register that public URL in Keycloak as a valid redirect URI.
+2. Use that public URL as `DesktopConfig.redirectUri` during desktop dev.
+3. Keep `DesktopConfig.loopbackUri` on a local address such as `http://localhost:8765/callback`.
+4. Keycloak redirects the browser to the public helper page after login.
+5. That page lets the user enter their local port.
+6. The page forwards the full callback, including Keycloak query parameters, to the local loopback server.
+
+This is especially convenient for:
+
+- desktop development, where your app is listening on a local loopback URL
+- web development, where you want a simple public callback during local work
+
+Desktop default dev setup:
+
+```dart
+final client = KeycloakClient(
+  config: ClientConfig(
+    baseUrl: 'https://auth.example.com',
+    realm: 'my-realm',
+    clientId: 'my-client',
+    desktop: const DesktopConfig(
+      redirectUri: 'https://winchetechnologies.co.uk/tools/oauth_redirect',
+      loopbackUri: 'http://localhost:8765/callback',
+    ),
+  ),
+);
+```
+
+This desktop split is intentional:
+
+- `redirectUri` bypasses Keycloak's localhost restriction
+- `loopbackUri` is where the desktop app actually receives the callback
+
+Web default dev setup:
+
+```dart
+final client = KeycloakClient(
+  config: ClientConfig(
+    baseUrl: 'https://auth.example.com',
+    realm: 'my-realm',
+    clientId: 'my-client',
+    web: const WebConfig(
+      redirectUri: 'https://winchetechnologies.co.uk/tools/oauth_redirect',
+    ),
+  ),
+);
+```
+
+If you already have your own public callback page, you can replace these defaults with your own URLs.
+
+If you are using a real endpoint and do not need the localhost workaround,
+prefer setting `loopbackUri` to `null`. In that case, the desktop strategy
+binds the local loopback server to `redirectUri` itself.
+
+Example:
+
+```dart
+final client = KeycloakClient(
+  config: ClientConfig(
+    baseUrl: 'https://auth.example.com',
+    realm: 'my-realm',
+    clientId: 'my-client',
+    desktop: const DesktopConfig(
+      redirectUri: 'https://your-domain.example.com/auth/callback',
+      loopbackUri: null,
+    ),
+  ),
+);
+```
+
+## Web Startup
+
+Web login is redirect-based. Call `handleWebCallback(Uri.base)` on startup before rendering the app:
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  if (kIsWeb) {
+    await client.handleWebCallback(Uri.base);
+  }
+
+  runApp(const MyApp());
+}
+```
+
+On web, `login()` redirects the current tab and does not complete before navigation.
+
+## Streams
+
+Auth state:
+
+```dart
+StreamBuilder<AuthState>(
+  stream: client.onAuthChange,
+  builder: (context, snapshot) {
+    final state = snapshot.data ?? AuthState.unknown;
+    return Text('$state');
+  },
+);
+```
+
+User info:
+
+```dart
+StreamBuilder<UserInfo?>(
+  stream: client.onUserChange,
+  builder: (context, snapshot) {
+    final user = snapshot.data;
+    return Text(user?.username ?? 'No user');
+  },
+);
+```
+
+## Platform Setup
+
+## Keycloak
+
+Register the correct redirect URIs in your Keycloak client.
+
+Typical values:
+
+- Android/iOS: `myapp://auth`
+- Desktop dev: `https://winchetechnologies.co.uk/tools/oauth_redirect`
+- Desktop local listener: `http://localhost:8765/callback`
+- Web dev: `https://winchetechnologies.co.uk/tools/oauth_redirect`
+- Web prod: your real public web callback URL
+
+For desktop dev with the helper endpoint:
+
+- `redirectUri` is the public URL you register in Keycloak
+- `loopbackUri` is the local listener inside your desktop app
+- the helper page bridges the public redirect back to the local loopback server
+
+## Android
+
+Add the deep-link intent filter to your `MainActivity` in `android/app/src/main/AndroidManifest.xml`:
 
 ```xml
 <activity
-  android:name="com.linusu.flutter_web_auth_2.CallbackActivity"
-  android:exported="true">
-  <intent-filter android:label="flutter_web_auth_2">
-    <action android:name="android.intent.action.VIEW" />
-    <category android:name="android.intent.category.DEFAULT" />
-    <category android:name="android.intent.category.BROWSABLE" />
-    <data android:scheme="myapp" android:host="auth"/>
-  </intent-filter>
+    android:name=".MainActivity"
+    android:exported="true"
+    android:launchMode="singleTop">
+    <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="myapp" android:host="auth"/>
+    </intent-filter>
 </activity>
 ```
 
-Replace `myapp` with the scheme part of your `redirectUri`.
+Do not register `net.openid.appauth.RedirectUriReceiverActivity` unless your app is actually using AppAuth. This package uses `app_links` for mobile deep-link callbacks, so the redirect should reopen your app activity directly.
 
-### iOS
+Also ensure internet permission exists:
 
-Add your scheme to `ios/Runner/Info.plist`:
+```xml
+<uses-permission android:name="android.permission.INTERNET"/>
+```
+
+Your `MobileConfig.redirectUri` must match the scheme/host you register here.
+
+## iOS
+
+Add your custom scheme to `ios/Runner/Info.plist`:
 
 ```xml
 <key>CFBundleURLTypes</key>
 <array>
   <dict>
+    <key>CFBundleTypeRole</key>
+    <string>Editor</string>
+    <key>CFBundleURLName</key>
+    <string>myapp</string>
     <key>CFBundleURLSchemes</key>
     <array>
       <string>myapp</string>
@@ -101,179 +298,84 @@ Add your scheme to `ios/Runner/Info.plist`:
 </array>
 ```
 
-Replace `myapp` with the scheme part of your `redirectUri`.
+Only the scheme goes in `CFBundleURLSchemes`. For the default
+`MobileConfig.redirectUri` of `myapp://auth`, iOS registers `myapp` here and
+your Dart config keeps the full redirect URI.
 
----
+## macOS / Windows / Linux
 
-## Usage
+Desktop login uses a system browser plus a local HTTP listener.
 
-### Listening to authentication state
+Important fields:
 
-`onAuthChange` emits the current state immediately on subscribe, then on every change.
+- `DesktopConfig.redirectUri`: the redirect URI sent to Keycloak
+- `DesktopConfig.loopbackUri`: optional separate local listener URI
+- `DesktopConfig.loopbackTimeout`: how long to wait for the callback
 
-```dart
-StreamBuilder<AuthState>(
-  stream: client.onAuthChange,
-  builder: (context, snapshot) {
-    final state = snapshot.data;
+Behavior:
 
-    if (state == null || state.isUnknown) {
-      return const CircularProgressIndicator();
-    }
-    if (state.isSignedIn) {
-      return const HomeScreen();
-    }
-    if (state.isSessionExpired) {
-      return const SessionExpiredScreen(); // prompt re-login with a message
-    }
-    return const LoginScreen();
-  },
-);
-```
+- if `loopbackUri` is set, the app listens on `loopbackUri` while Keycloak uses `redirectUri`
+- if `loopbackUri` is `null`, the app listens directly on `redirectUri`
 
-| State | Meaning |
-| ------- | --------- |
-| `AuthState.unknown` | Initial state; session restore in progress |
-| `AuthState.signedIn` | User has a valid session |
-| `AuthState.signedOut` | User explicitly logged out |
-| `AuthState.sessionExpired` | Refresh token expired; user must log in again |
+For local development, the easiest setup is:
 
----
+- register `https://winchetechnologies.co.uk/tools/oauth_redirect` in Keycloak
+- keep `loopbackUri` on a local port like `http://localhost:8765/callback`
+- when the helper page opens, enter that local port so it forwards the callback back to your app
 
-### Listening to user changes
+For real endpoint setups, prefer:
 
-`onUserChange` emits the current `UserInfo?` immediately on subscribe, then whenever the profile is updated.
+- `redirectUri`: your real callback URL
+- `loopbackUri: null`
+
+That avoids splitting the two values when you do not need the localhost workaround.
+
+## Web
+
+For local development, you can use the same public helper endpoint:
 
 ```dart
-StreamBuilder<UserInfo?>(
-  stream: client.onUserChange,
-  builder: (context, snapshot) {
-    final user = snapshot.data;
-    if (user == null) return const SizedBox.shrink();
-
-    return Text('Hello, ${user.username}');
-  },
-);
+web: const WebConfig(
+  redirectUri: 'https://winchetechnologies.co.uk/tools/oauth_redirect',
+),
 ```
 
-**`UserInfo` fields:**
+For production, use your own public callback URL instead.
 
-| Field | Type | Scope required | Description |
-| ------- | ------ | -------------- | ------------- |
-| `id` | `String` | *(always present)* | Keycloak subject (`sub`) |
-| `username` | `String?` | `profile` | Preferred username |
-| `givenName` | `String?` | `profile` | First name |
-| `familyName` | `String?` | `profile` | Last name |
-| `email` | `String?` | `email` | Email address |
-| `emailVerified` | `bool?` | `email` | Whether the email is verified |
+Always:
 
-Fields are `null` when the corresponding scope was not requested or the claim was not set on the account.
+- register the web redirect URI in Keycloak
+- call `handleWebCallback(Uri.base)` on app startup
 
----
+## Main API
 
-### Login
+- `initialize()`: restore any existing session
+- `login()`: start authentication
+- `handleWebCallback(uri)`: resume a web redirect flow
+- `logout()`: clear session and notify Keycloak when possible
+- `getAuthToken()`: return a valid access token or `null`
+- `reloadUser()`: reload profile data from `/userinfo`
+- `onAuthChange`: stream of `AuthState`
+- `onUserChange`: stream of `UserInfo?`
 
-Opens the system browser for Keycloak's login page and completes the Authorization Code flow automatically.
+## Auth States
 
-```dart
-await client.login();
-// Auth state stream updates to signedIn on success.
-```
+- `AuthState.unknown`
+- `AuthState.signedOut`
+- `AuthState.signedIn`
+- `AuthState.sessionExpired`
 
-> Returns without throwing if the user cancels the browser flow.
+## Exceptions
 
----
+The package throws typed exceptions:
 
-### Logout
+- `KeycloakNetworkException`
+- `KeycloakServerException`
+- `KeycloakSessionExpiredException`
+- `KeycloakTimeoutException`
 
-Invalidates the session on the Keycloak server and clears local credentials.
+## Notes
 
-```dart
-await client.logout();
-```
-
----
-
-### Getting a fresh access token
-
-Use `getAuthToken()` when making authenticated API calls. It returns the current access token, refreshing it automatically if expired.
-
-```dart
-final token = await client.getAuthToken();
-if (token != null) {
-  dio.options.headers['Authorization'] = 'Bearer $token';
-}
-```
-
-Returns `null` if the user is not signed in or the session has fully expired.
-
----
-
-### Reloading user profile
-
-Fetches the latest user info from the Keycloak `/userinfo` endpoint and updates the `onUserChange` stream.
-
-```dart
-final user = await client.reloadUser();
-```
-
----
-
-## Error handling
-
-`login()` and `reloadUser()` throw typed exceptions — no dependency on Dio internals required.
-
-| Exception | When thrown |
-| --------- | ----------- |
-| `KeycloakNetworkException` | No connectivity or request timeout |
-| `KeycloakServerException` | Keycloak returned an HTTP error (`statusCode` available) |
-| `KeycloakSessionExpiredException` | Refresh token expired; user must log in again |
-
-```dart
-try {
-  await client.login();
-} on KeycloakNetworkException {
-  // show "check your connection"
-} on KeycloakServerException catch (e) {
-  // show "server error ${e.statusCode}"
-}
-```
-
-`getAuthToken()` never throws — it returns `null` when the session is unavailable.
-
----
-
-## Log Levels
-
-Control log verbosity with the `logLevel` constructor parameter:
-
-```dart
-KeycloakClient(
-  // ...
-  logLevel: LogLevel.info,
-);
-```
-
-| Level | Description |
-| ------- | ------------- |
-| `LogLevel.trace` | Everything, including internal state transitions *(default)* |
-| `LogLevel.debug` | Debug-level messages |
-| `LogLevel.info` | Informational messages (logins, token refreshes) |
-| `LogLevel.warning` | Warnings (session expiry, cancelled logins) |
-| `LogLevel.error` | Errors only |
-| `LogLevel.fatal` | Fatal errors only |
-| `LogLevel.off` | Disable all logging |
-
----
-
-## Disposal
-
-Always call `dispose()` when the client is no longer needed to cancel timers, close streams, and release the HTTP client.
-
-```dart
-@override
-void dispose() {
-  client.dispose();
-  super.dispose();
-}
-```
+- Call `initialize()` before `login()`, `logout()`, or `reloadUser()`
+- Credentials are stored with `flutter_secure_storage`
+- User profile data comes from Keycloak's `/userinfo` endpoint
