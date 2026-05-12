@@ -3,11 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:keycloak_client/keycloak_client.dart';
 
 final client = KeycloakClient(
-  config: ClientConfig(
-    baseUrl: 'your-keycloak-server',
-    realm: 'your-realm',
-    clientId: 'your-client-id',
-  ),
+  clientConfig: ClientConfig(baseUrl: 'http://localhost:8080', realm: 'smartairway', clientId: 'smartairway-app', refreshTimeout: const Duration(seconds: 3)),
 );
 
 void main() async {
@@ -143,7 +139,10 @@ final class _HomeScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Home'),
-        actions: [IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: client.logout)],
+        actions: [
+          IconButton(tooltip: 'Manage account', icon: const Icon(Icons.manage_accounts), onPressed: client.manageAccount),
+          IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: client.logout),
+        ],
       ),
       body: Center(child: _UserInfoCard(client: client)),
     );

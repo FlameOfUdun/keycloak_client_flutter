@@ -2,14 +2,17 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:logger/logger.dart';
 import 'package:oauth2/oauth2.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import 'src/core/session_manager.dart';
+import 'src/core/token_service.dart';
 import 'src/enums/auth_state.dart';
 import 'src/enums/log_level.dart';
+import 'src/enums/refresh_result.dart';
 import 'src/interfaces/auth_credentials_store.dart';
 import 'src/models/client_config.dart';
 import 'src/models/keycloak_exception.dart';
@@ -34,53 +37,64 @@ export 'src/interfaces/pending_grant_store.dart';
 /// Keycloak client for handling authentication, token management, and user
 /// sessions across all platforms.
 final class KeycloakClient {
-  final _authBroadcast = StreamController<AuthState>.broadcast();
-  final _userBroadcast = StreamController<UserInfo?>.broadcast();
-
   late final IAuthCredentialsStore _credentialsStorage;
   late final ILoginStrategy _loginStrategy;
   late final Logger _logger;
+  late final SessionManager _sessionManager;
+  late final TokenService _tokenService;
 
   final ClientConfig _clientConfig;
+  final DesktopConfig _desktopConfig;
+  final MobileConfig _mobileConfig;
+  final WebConfig _webConfig;
+  final RefreshOperation? _tokenRefreshOperation;
 
-  Client? _oauthClient;
   Completer<void>? _initCompleter;
-  Completer<bool>? _refreshCompleter;
-  AuthState _authState = AuthState.unknown;
-  UserInfo? _currentUser;
-  Timer? _refreshTimer;
   bool _initialized = false;
   bool _disposed = false;
 
-  String get _clientId => _clientConfig.clientId;
-  List<String> get _scopes => _clientConfig.scopes;
-  WebConfig get _webConfig => _clientConfig.web;
-  DesktopConfig get _desktopConfig => _clientConfig.desktop;
-  MobileConfig get _mobileConfig => _clientConfig.mobile;
-
   /// Creates a [KeycloakClient] from a single configuration object.
-  KeycloakClient({required ClientConfig config})
-    : _clientConfig = config,
+  KeycloakClient({
+    required ClientConfig clientConfig,
+    WebConfig? webConfig,
+    MobileConfig? mobileConfig,
+    DesktopConfig? desktopConfig,
+  })
+    : _clientConfig = clientConfig,
+      _desktopConfig = desktopConfig ?? const DesktopConfig(),
+      _mobileConfig = mobileConfig ?? const MobileConfig(),
+      _webConfig = webConfig ?? const WebConfig(),
       _credentialsStorage = const SecureStorageAuthCredentialsStore(),
+      _tokenRefreshOperation = null,
       _loginStrategy = defaultLoginStrategy {
-    _createLogger(config.logLevel);
+    _createLogger(clientConfig.logLevel);
+    _createInternals();
   }
 
   @visibleForTesting
   KeycloakClient.withDependencies({
-    required ClientConfig config,
+    required ClientConfig clientConfig,
     required IAuthCredentialsStore credentialsStorage,
+    WebConfig? webConfig,
+    MobileConfig? mobileConfig,
+    DesktopConfig? desktopConfig,
     IDesktopLoginStrategy? desktopLoginStrategy,
     IMobileLoginStrategy? mobileLoginStrategy,
     IWebLoginStrategy? webLoginStrategy,
-  }) : _clientConfig = config,
+    RefreshOperation? tokenRefreshOperation,
+  }) : _clientConfig = clientConfig,
+       _desktopConfig = desktopConfig ?? const DesktopConfig(),
+       _mobileConfig = mobileConfig ?? const MobileConfig(),
+       _webConfig = webConfig ?? const WebConfig(),
        _credentialsStorage = credentialsStorage,
+       _tokenRefreshOperation = tokenRefreshOperation,
        _loginStrategy = _selectLoginStrategy(
          desktopOverride: desktopLoginStrategy,
          mobileOverride: mobileLoginStrategy,
          webOverride: webLoginStrategy,
        ) {
-    _createLogger(config.logLevel);
+    _createLogger(clientConfig.logLevel);
+    _createInternals();
   }
 
   static ILoginStrategy _selectLoginStrategy({
@@ -112,16 +126,29 @@ final class KeycloakClient {
     );
   }
 
-  UserInfo? get currentUser => _currentUser;
-  AuthState get authState => _authState;
+  void _createInternals() {
+    _sessionManager = SessionManager();
+    _tokenService = TokenService(
+      store: _credentialsStorage,
+      scopes: _clientConfig.scopes,
+      onPermanentFailure: () => _endSession(AuthState.sessionExpired),
+      onRecovery: () => _reloadUser().ignore(),
+      logger: _logger,
+      refreshTimeout: _clientConfig.refreshTimeout,
+      refreshOperation: _tokenRefreshOperation,
+    );
+  }
+
+  UserInfo? get currentUser => _sessionManager.currentUser;
+  AuthState get authState => _sessionManager.authState;
 
   /// Emits the current [UserInfo] immediately on listen, then on every change.
-  Stream<UserInfo?> get onUserChange => _bufferedStream(_userBroadcast, () => currentUser);
+  Stream<UserInfo?> get onUserChange => _bufferedStream(_sessionManager.userStream, () => currentUser);
 
   /// Emits the current [AuthState] immediately on listen, then on every change.
-  Stream<AuthState> get onAuthChange => _bufferedStream(_authBroadcast, () => authState);
+  Stream<AuthState> get onAuthChange => _bufferedStream(_sessionManager.authStream, () => authState);
 
-  Stream<T> _bufferedStream<T>(StreamController<T> broadcast, T Function() current) {
+  Stream<T> _bufferedStream<T>(Stream<T> broadcast, T Function() current) {
     _assertNotDisposed();
     final controller = StreamController<T>();
     StreamSubscription<T>? sub;
@@ -129,7 +156,7 @@ final class KeycloakClient {
       await waitForInitialization();
       if (controller.isClosed) return;
       controller.add(current());
-      sub = broadcast.stream.listen(
+      sub = broadcast.listen(
         (e) {
           if (!controller.isClosed) controller.add(e);
         },
@@ -148,8 +175,10 @@ final class KeycloakClient {
     return controller.stream;
   }
 
+  /// Waits for the client to initialize, returning `true` if initialization succeeded
+  /// or `false` if initialization failed. Initialization is required before most
+  /// operations, but is performed automatically on first use if not called explicitly.
   Future<bool> waitForInitialization() async {
-    _assertNotDisposed();
     try {
       await initialize();
       return true;
@@ -159,48 +188,60 @@ final class KeycloakClient {
     }
   }
 
+  /// Initializes the client by loading stored credentials and user info, validating
+  /// sessions, and setting up token refresh. This should be called once on app startup.
+  ///
+  /// If not called explicitly, the client will auto-initialize on first use (e.g. login or getAuthToken).
   Future<void> initialize() {
     _assertNotDisposed();
     if (_initialized) return Future.value();
-    if (_initCompleter != null && !_initCompleter!.isCompleted) return _initCompleter!.future;
+    if (_initCompleter != null && !_initCompleter!.isCompleted) {
+      return _initCompleter!.future;
+    }
 
     _logger.i('Initializing KeycloakClient');
     _initCompleter = Completer<void>();
 
     Future(() async {
-          final stored = await _credentialsStorage.getCredentials();
-          final user = await _credentialsStorage.getUser();
+      final stored = await _credentialsStorage.getCredentials();
+      final user = await _credentialsStorage.getUser();
 
-          if (stored == null || user == null) {
-            _logger.i('No stored credentials. User needs to sign in.');
-            _onAuthChange(AuthState.signedOut);
-            return;
-          }
+      if (stored == null || user == null) {
+        _logger.i('No stored credentials. User needs to sign in.');
+        _sessionManager.endSession(AuthState.signedOut);
+        return;
+      }
 
-          if (stored.isRefreshExpired) {
-            _logger.i('Refresh token expired. Clearing session.');
-            await _credentialsStorage.clear();
-            _onAuthChange(AuthState.sessionExpired);
-            _onUserChange(null);
-            return;
-          }
+      if (stored.isRefreshExpired) {
+        _logger.i('Refresh token expired. Clearing session.');
+        await _endSession(AuthState.sessionExpired);
+        return;
+      }
 
-          _oauthClient = Client(stored.toOAuth2Credentials(_clientConfig.tokenEndpoint), identifier: _clientId);
-          _onUserChange(user);
+      _tokenService.setClient(
+        Client(
+          stored.toOAuth2Credentials(_clientConfig.tokenEndpoint),
+          identifier: _clientConfig.clientId,
+        ),
+      );
 
-          if (stored.isAccessExpired) {
-            _logger.i('Access token expired, refreshing on init.');
-            final ok = await _attemptRefresh();
-            if (!ok && _authState != AuthState.sessionExpired) {
-              _onAuthChange(AuthState.signedIn);
-            }
-          } else {
-            _onAuthChange(AuthState.signedIn);
-            _scheduleRefresh(stored);
-          }
-
-          _reloadUser().ignore();
-        })
+      if (stored.isAccessExpired) {
+        _logger.i('Access token expired, refreshing on init.');
+        final result = await _tokenService.attemptRefresh();
+        if (result is RefreshPermanentFailure) return;
+        // Offline-first: start the session with the cached user profile so the
+        // app is usable immediately; _reloadUser() will patch it up on recovery.
+        _sessionManager.beginSession(user);
+        // Only re-fetch user info when refresh actually succeeded.
+        // On transient failure, onRecovery fires _reloadUser() when network returns.
+        // Note: TokenService._handleTransientFailure already called scheduleRefresh.
+        if (result is RefreshSuccess) _reloadUser().ignore();
+      } else {
+        _sessionManager.beginSession(user);
+        _tokenService.scheduleRefresh(stored);
+        _reloadUser().ignore();
+      }
+    })
         .then((_) {
           _initialized = true;
           _initCompleter!.complete();
@@ -224,8 +265,7 @@ final class KeycloakClient {
   ///
   /// Returns normally (without throwing) if the user cancels.
   Future<void> login() async {
-    _assertInitialized();
-    _assertNotDisposed();
+    await waitForInitialization();
 
     _logger.i('Initiating login flow via ${_loginStrategy.runtimeType}.');
 
@@ -246,12 +286,29 @@ final class KeycloakClient {
   }
 
   Future<void> _finalizeLogin(Client client) async {
-    _oauthClient = client;
+    _tokenService.setClient(client);
     final credentials = UserCredentials.fromOAuth2(client.credentials);
     await _credentialsStorage.setCredentials(credentials);
-    _scheduleRefresh(credentials);
-    _onAuthChange(AuthState.signedIn);
-    await _reloadUser();
+    final user = await _reloadUser();
+    if (user == null) throw KeycloakServerException(0, 'Could not load user after login');
+    _sessionManager.beginSession(user);
+    _tokenService.scheduleRefresh(credentials); // armed AFTER session is fully established
+  }
+
+  /// Opens the Keycloak account console in an external browser so the user
+  /// can manage their profile, credentials, sessions, and (if enabled on the
+  /// realm) delete their account.
+  ///
+  /// Throws [KeycloakNetworkException] if the platform cannot launch a browser.
+  Future<void> manageAccount() async {
+    _assertNotDisposed();
+
+    final url = _clientConfig.accountEndpoint;
+    _logger.i('Opening account console: $url');
+
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      throw const KeycloakNetworkException('Could not open account console.');
+    }
   }
 
   /// **Web only.** Call this once on app startup with the current page URI
@@ -269,15 +326,11 @@ final class KeycloakClient {
   /// await KeycloakClient.handleWebCallback(Uri.base);
   /// ```
   Future<bool> handleWebCallback(Uri uri) async {
-    _assertNotDisposed();
     final strategy = _loginStrategy;
     if (strategy is! IWebLoginStrategy) {
       throw StateError('handleWebCallback can only be used with WebLoginStrategy.');
     }
 
-    // Ensure the client has initialised first so the post-callback
-    // _finalizeLogin path does not race a concurrent initialize() that
-    // would observe credentials-without-user and flip state to signedOut.
     await waitForInitialization();
 
     final client = await strategy.handleCallback(uri);
@@ -288,41 +341,59 @@ final class KeycloakClient {
     return true;
   }
 
+  /// Logs out the current user by clearing local session and notifying the server.
   Future<void> logout() async {
-    _assertInitialized();
     _assertNotDisposed();
-
     _logger.i('Logging out: ${currentUser?.id ?? 'unknown'}');
-    _refreshTimer?.cancel();
 
-    try {
-      final stored = await _credentialsStorage.getCredentials();
-      if (stored != null && _oauthClient != null) {
-        await _oauthClient!.post(
-          _clientConfig.logoutEndpoint,
-          body: {'client_id': _clientId, 'refresh_token': stored.refreshToken, if (stored.idToken != null) 'id_token_hint': stored.idToken!},
-        );
-      }
-    } catch (_) {
-      _logger.e('Logout server notification failed (continuing local logout).');
+    final stored = await _credentialsStorage.getCredentials();
+    if (stored != null) {
+      await _tokenService.revokeSession(
+        logoutEndpoint: _clientConfig.logoutEndpoint,
+        clientId: _clientConfig.clientId,
+        refreshToken: stored.refreshToken,
+        idToken: stored.idToken,
+      );
     }
 
-    _oauthClient?.close();
-    _oauthClient = null;
-    await _credentialsStorage.clear();
-    _onAuthChange(AuthState.signedOut);
-    _onUserChange(null);
+    await _endSession(AuthState.signedOut);
     _logger.i('User logged out.');
+  }
+
+  Future<void> _endSession(AuthState reason) async {
+    _tokenService.invalidate();
+    await _credentialsStorage.clear();
+    _sessionManager.endSession(reason);
   }
 
   /// Fetches the latest user profile from the Keycloak userinfo endpoint.
   Future<UserInfo?> reloadUser() async {
-    _assertInitialized();
+    await waitForInitialization();
     return _reloadUser();
   }
 
+  /// Forces an immediate token refresh regardless of access token expiry,
+  /// then reloads the user profile. Useful after returning from account
+  /// management or when an admin has changed the user's roles and you need
+  /// updated claims without waiting for the scheduled refresh.
+  ///
+  /// Throws [KeycloakNetworkException] if the server is unreachable.
+  /// Does nothing if the session has permanently expired (streams will already
+  /// have emitted [AuthState.sessionExpired]).
+  Future<void> refreshToken() async {
+    await waitForInitialization();
+    final result = await _tokenService.attemptRefresh();
+    switch (result) {
+      case RefreshSuccess():
+        _reloadUser().ignore();
+      case RefreshTransientFailure(:final cause):
+        throw KeycloakNetworkException(cause);
+      case RefreshPermanentFailure():
+        break; // session already ended via onPermanentFailure
+    }
+  }
+
   Future<UserInfo?> _reloadUser() async {
-    _assertNotDisposed();
     _logger.i('Reloading user data.');
 
     try {
@@ -331,114 +402,41 @@ final class KeycloakClient {
         _logger.w('No access token available to reload user.');
         return null;
       }
-      final response = await _oauthClient!.get(_clientConfig.userInfoEndpoint);
+      final client = _tokenService.oauthClient;
+      if (client == null) return null;
+      final response = await client.get(_clientConfig.userInfoEndpoint);
       if (response.statusCode != 200) {
         throw KeycloakServerException(response.statusCode, 'UserInfo request failed');
       }
       final user = UserInfo.fromApi(jsonDecode(response.body) as Map<String, dynamic>);
       await _credentialsStorage.setUser(user);
-      _onUserChange(user);
+      _sessionManager.updateUser(user);
       _logger.i('User data reloaded: ${user.id}');
       return user;
-    } catch (e) {
-      _logger.e('Reloading user failed.');
+    } on KeycloakNetworkException {
+      _logger.w('Cannot reload user — network unavailable.');
+      return null;
+    } catch (e, st) {
+      _logger.e('Reloading user failed.', error: e, stackTrace: st);
       rethrow;
     }
   }
+
   /// Returns a valid access token, refreshing inline if expired.
   /// Returns `null` when no session exists or the session cannot be recovered.
   Future<String?> getAuthToken() async {
-    _assertNotDisposed();
     await waitForInitialization();
 
     final stored = await _credentialsStorage.getCredentials();
     if (stored == null) return null;
     if (!stored.isAccessExpired) return stored.accessToken;
 
-    final ok = await _attemptRefresh();
-    if (!ok) return null;
-
-    return (await _credentialsStorage.getCredentials())?.accessToken;
-  }
-
-  void _scheduleRefresh(UserCredentials credentials, {bool isRetry = false}) {
-    _refreshTimer?.cancel();
-
-    final duration = isRetry
-        ? const Duration(seconds: 30)
-        : () {
-            final d = credentials.accessTokenExpiry.difference(DateTime.now()) - const Duration(minutes: 1);
-            return d <= Duration.zero ? const Duration(seconds: 5) : d;
-          }();
-
-    _logger.i(isRetry ? 'Retry scheduled in 30s' : 'Token refresh in ${duration.inMinutes}m ${duration.inSeconds % 60}s');
-
-    _refreshTimer = Timer(duration, _attemptRefresh);
-  }
-
-  Future<bool> _attemptRefresh() {
-    if (_refreshCompleter != null && !_refreshCompleter!.isCompleted) {
-      return _refreshCompleter!.future;
-    }
-    _refreshCompleter = Completer<bool>();
-    _doRefresh().then(_refreshCompleter!.complete, onError: (_, _) => _refreshCompleter!.complete(false));
-    return _refreshCompleter!.future;
-  }
-
-  Future<bool> _doRefresh() async {
-    _logger.i('Attempting token refresh.');
-
-    try {
-      if (_oauthClient == null) throw const KeycloakSessionExpiredException();
-
-      _oauthClient = await _oauthClient!.refreshCredentials(_scopes);
-
-      final credentials = UserCredentials.fromOAuth2(_oauthClient!.credentials);
-      await _credentialsStorage.setCredentials(credentials);
-      _onAuthChange(AuthState.signedIn);
-      _scheduleRefresh(credentials);
-      _logger.i('Token refresh successful.');
-      return true;
-    } on ExpirationException {
-      _logger.w('Session expired, re-authentication required.');
-      _onAuthChange(AuthState.sessionExpired);
-      return false;
-    } on AuthorizationException catch (e) {
-      if (e.error == 'invalid_grant') {
-        _logger.w('Refresh token revoked or expired.');
-        _onAuthChange(AuthState.sessionExpired);
-      } else {
-        _logger.e('Authorization error during refresh, retrying in 30s.');
-        final stored = await _credentialsStorage.getCredentials();
-        if (stored != null) _scheduleRefresh(stored, isRetry: true);
-      }
-      return false;
-    } on SocketException {
-      _logger.w('Network error during refresh, retrying in 30s.');
-      final stored = await _credentialsStorage.getCredentials();
-      if (stored != null) _scheduleRefresh(stored, isRetry: true);
-      return false;
-    }
-  }
-
-  void _onAuthChange(AuthState state) {
-    if (_authState == state) return;
-    _logger.i('Auth state: $_authState → $state');
-    _authState = state;
-    _authBroadcast.add(_authState);
-  }
-
-  void _onUserChange(UserInfo? user) {
-    if (_currentUser?.id == user?.id) return;
-    _logger.i('User: ${_currentUser?.id ?? 'null'} → ${user?.id ?? 'null'}');
-    _currentUser = user;
-    _userBroadcast.add(_currentUser);
-  }
-
-  void _assertInitialized() {
-    if (!_initialized) {
-      throw StateError('KeycloakClient has not been initialized. Call initialize() first.');
-    }
+    final result = await _tokenService.attemptRefresh();
+    return switch (result) {
+      RefreshSuccess(:final credentials) => credentials.accessToken,
+      RefreshTransientFailure(:final cause) => throw KeycloakNetworkException(cause),
+      RefreshPermanentFailure() => null,
+    };
   }
 
   void _assertNotDisposed() {
@@ -449,9 +447,7 @@ final class KeycloakClient {
     if (_disposed) return;
     _disposed = true;
     _logger.i('Disposing KeycloakClient.');
-    _authBroadcast.close();
-    _userBroadcast.close();
-    _refreshTimer?.cancel();
-    _oauthClient?.close();
+    _sessionManager.dispose();
+    _tokenService.dispose();
   }
 }

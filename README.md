@@ -14,7 +14,7 @@ Cross-platform Keycloak authentication for Flutter with:
 
 ```yaml
 dependencies:
-  keycloak_client: ^1.0.0
+  keycloak_client: ^2.0.0
 ```
 
 ## Quick Start
@@ -23,11 +23,15 @@ dependencies:
 import 'package:keycloak_client/keycloak_client.dart';
 
 final client = KeycloakClient(
-  config: ClientConfig(
+  clientConfig: ClientConfig(
     baseUrl: 'https://auth.example.com',
     realm: 'my-realm',
     clientId: 'my-client',
   ),
+  // optional — only needed to override defaults
+  mobileConfig: MobileConfig(redirectUri: 'myapp://auth'),
+  desktopConfig: DesktopConfig(loopbackUri: Uri.parse('http://localhost:8765/callback')),
+  webConfig: WebConfig(redirectUri: 'https://example.com/auth/callback'),
 );
 ```
 
@@ -62,24 +66,37 @@ await client.logout();
 Get a valid access token:
 
 ```dart
-final token = await client.getAuthToken();
+try {
+  final token = await client.getAuthToken();
+  if (token == null) {
+    // No active session — show login screen
+  } else {
+    // Use token in Authorization header
+  }
+} on KeycloakNetworkException {
+  // Session is valid but device is offline — show offline banner
+}
 ```
 
 ## Configuration
 
-Everything is configured through `ClientConfig`.
+Everything is configured through `ClientConfig` and optional per-platform config objects.
 
 ```dart
 final client = KeycloakClient(
-  config: ClientConfig(
+  clientConfig: ClientConfig(
     baseUrl: 'https://auth.example.com',
     realm: 'my-realm',
     clientId: 'my-client',
   ),
+  // optional platform overrides
+  mobileConfig: MobileConfig(redirectUri: 'myapp://auth'),
+  desktopConfig: DesktopConfig(loopbackUri: Uri.parse('http://localhost:8765/callback')),
+  webConfig: WebConfig(redirectUri: 'https://example.com/auth/callback'),
 );
 ```
 
-Main fields:
+`ClientConfig` fields:
 
 - `baseUrl`: Keycloak server root
 - `realm`: Keycloak realm name
@@ -87,6 +104,7 @@ Main fields:
 - `clientSecret`: for confidential clients only
 - `scopes`: defaults to `openid`, `email`, `profile`
 - `logLevel`: package logging verbosity
+- `refreshTimeout`: HTTP timeout for each token refresh attempt — defaults to `Duration(seconds: 15)`. Lower for faster offline detection; raise for high-latency deployments.
 
 Platform config defaults:
 
@@ -268,8 +286,10 @@ Always:
 - `login()`: start authentication
 - `handleWebCallback(uri)`: resume a web redirect flow
 - `logout()`: clear session and notify Keycloak when possible
-- `getAuthToken()`: return a valid access token or `null`
+- `getAuthToken()`: return a valid access token, `null` if no session, or throw `KeycloakNetworkException` if offline with a valid session
+- `refreshToken()`: force an immediate token refresh and user profile reload regardless of token expiry — useful after account management or role changes; throws `KeycloakNetworkException` if offline
 - `reloadUser()`: reload profile data from `/userinfo`
+- `manageAccount()`: open Keycloak account console in external browser
 - `onAuthChange`: stream of `AuthState`
 - `onUserChange`: stream of `UserInfo?`
 
