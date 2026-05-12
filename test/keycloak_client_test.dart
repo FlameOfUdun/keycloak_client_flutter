@@ -26,8 +26,7 @@ void main() {
   });
 
   group('initialize()', () {
-    test(
-        'calls refreshOperation exactly once when access token is expired and '
+    test('calls refreshOperation exactly once when access token is expired and '
         'server is offline', () async {
       const refreshTimeout = Duration(milliseconds: 100);
       // Allow well more than 2 × refreshTimeout so any double-call bug can manifest.
@@ -66,8 +65,12 @@ void main() {
       // With refreshTimeout=100ms, a second call would finish within 200ms.
       await Future.delayed(settleDuration);
 
-      expect(refreshCallCount, 1,
-          reason: 'Double-timeout bug: refreshOperation called more than once during initialize()');
+      expect(
+        refreshCallCount,
+        1,
+        reason:
+            'Double-timeout bug: refreshOperation called more than once during initialize()',
+      );
 
       client.dispose();
     });

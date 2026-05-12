@@ -57,5 +57,6 @@ final class PendingGrant {
     createdAtMs: json['createdAtMs'] as int,
   );
 
-  factory PendingGrant.fromJsonString(String raw) => PendingGrant.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+  factory PendingGrant.fromJsonString(String raw) =>
+      PendingGrant.fromJson(jsonDecode(raw) as Map<String, dynamic>);
 }

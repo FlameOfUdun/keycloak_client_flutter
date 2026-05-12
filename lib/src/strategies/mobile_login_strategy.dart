@@ -20,7 +20,10 @@ final class MobileLoginStrategy implements IMobileLoginStrategy {
   const MobileLoginStrategy();
 
   @override
-  Future<Client?> login({required MobileConfig platformConfig, required ClientConfig clientConfig}) async {
+  Future<Client?> login({
+    required MobileConfig platformConfig,
+    required ClientConfig clientConfig,
+  }) async {
     final grant = AuthorizationCodeGrant(
       clientConfig.clientId,
       clientConfig.authorizationEndpoint,
@@ -30,10 +33,15 @@ final class MobileLoginStrategy implements IMobileLoginStrategy {
     );
 
     final redirect = Uri.parse(platformConfig.redirectUri);
-    final authUrl = grant.getAuthorizationUrl(redirect, scopes: clientConfig.scopes);
+    final authUrl = grant.getAuthorizationUrl(
+      redirect,
+      scopes: clientConfig.scopes,
+    );
 
     if (!await launchUrl(authUrl, mode: LaunchMode.externalApplication)) {
-      throw const KeycloakNetworkException('Could not launch browser for login.');
+      throw const KeycloakNetworkException(
+        'Could not launch browser for login.',
+      );
     }
 
     // Wait for the OS to deliver the deep link back to the app
@@ -47,7 +55,9 @@ final class MobileLoginStrategy implements IMobileLoginStrategy {
           .timeout(
             platformConfig.deepLinkTimeout,
             onTimeout: () {
-              throw const KeycloakTimeoutException('Login timed out waiting for deep link.');
+              throw const KeycloakTimeoutException(
+                'Login timed out waiting for deep link.',
+              );
             },
           );
     } on KeycloakTimeoutException {
@@ -65,7 +75,8 @@ final class MobileLoginStrategy implements IMobileLoginStrategy {
   }
 
   String _generateCodeVerifier() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
     final rng = Random.secure();
     return List.generate(64, (_) => chars[rng.nextInt(chars.length)]).join();
   }

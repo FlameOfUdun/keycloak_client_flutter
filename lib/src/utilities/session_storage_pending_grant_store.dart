@@ -12,11 +12,16 @@ const _kPendingGrantPrefix = 'keycloak_client.pending.';
 final class SessionStoragePendingGrantStore implements IPendingGrantStore {
   final Duration ttl;
 
-  const SessionStoragePendingGrantStore({this.ttl = const Duration(minutes: 10)});
+  const SessionStoragePendingGrantStore({
+    this.ttl = const Duration(minutes: 10),
+  });
 
   @override
   void put(PendingGrant grant) {
-    window.sessionStorage.setItem('$_kPendingGrantPrefix${grant.state}', grant.toJsonString());
+    window.sessionStorage.setItem(
+      '$_kPendingGrantPrefix${grant.state}',
+      grant.toJsonString(),
+    );
   }
 
   @override

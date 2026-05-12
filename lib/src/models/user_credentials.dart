@@ -45,10 +45,14 @@ final class UserCredentials {
     return UserCredentials(
       accessToken: json['access_token'] as String,
       refreshToken: json['refresh_token'] as String,
-      accessTokenExpiry: DateTime.now().add(Duration(seconds: json['expires_in'] as int)),
+      accessTokenExpiry: DateTime.now().add(
+        Duration(seconds: json['expires_in'] as int),
+      ),
       // refresh_expires_in == 0 → offline token with no local expiry; use far-future
       // sentinel so local checks never fire — actual expiry is enforced via 401.
-      refreshTokenExpiry: isOffline ? DateTime(9999) : DateTime.now().add(Duration(seconds: refreshExpiresIn)),
+      refreshTokenExpiry: isOffline
+          ? DateTime(9999)
+          : DateTime.now().add(Duration(seconds: refreshExpiresIn)),
       idToken: json['id_token'] as String?,
       isOfflineToken: isOffline,
     );
@@ -79,8 +83,12 @@ final class UserCredentials {
     return UserCredentials(
       accessToken: credentials.accessToken,
       refreshToken: credentials.refreshToken ?? '',
-      accessTokenExpiry: credentials.expiration ?? DateTime.now().add(const Duration(minutes: 5)),
-      refreshTokenExpiry: isOfflineToken ? DateTime(9999) : DateTime.now().add(refreshTokenLifetime),
+      accessTokenExpiry:
+          credentials.expiration ??
+          DateTime.now().add(const Duration(minutes: 5)),
+      refreshTokenExpiry: isOfflineToken
+          ? DateTime(9999)
+          : DateTime.now().add(refreshTokenLifetime),
       idToken: credentials.idToken,
       isOfflineToken: isOfflineToken,
     );
@@ -99,13 +107,14 @@ final class UserCredentials {
   };
 
   /// Converts to an [oauth2.Credentials] object for use with [oauth2.Client].
-  oauth2.Credentials toOAuth2Credentials(Uri tokenEndpoint) => oauth2.Credentials(
-    accessToken,
-    refreshToken: refreshToken.isNotEmpty ? refreshToken : null,
-    idToken: idToken,
-    tokenEndpoint: tokenEndpoint,
-    expiration: accessTokenExpiry,
-  );
+  oauth2.Credentials toOAuth2Credentials(Uri tokenEndpoint) =>
+      oauth2.Credentials(
+        accessToken,
+        refreshToken: refreshToken.isNotEmpty ? refreshToken : null,
+        idToken: idToken,
+        tokenEndpoint: tokenEndpoint,
+        expiration: accessTokenExpiry,
+      );
 
   // ─── Expiry checks ─────────────────────────────────────────────────────────
 
@@ -115,7 +124,8 @@ final class UserCredentials {
   /// `true` if the refresh token is expired.
   ///
   /// Always `false` for offline tokens — the server communicates expiry via 401.
-  bool get isRefreshExpired => isOfflineToken ? false : DateTime.now().isAfter(refreshTokenExpiry);
+  bool get isRefreshExpired =>
+      isOfflineToken ? false : DateTime.now().isAfter(refreshTokenExpiry);
 
   /// `true` if both access and refresh tokens are expired.
   bool get isExpired => isAccessExpired && isRefreshExpired;

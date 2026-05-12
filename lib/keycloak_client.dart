@@ -59,14 +59,13 @@ final class KeycloakClient {
     WebConfig? webConfig,
     MobileConfig? mobileConfig,
     DesktopConfig? desktopConfig,
-  })
-    : _clientConfig = clientConfig,
-      _desktopConfig = desktopConfig ?? const DesktopConfig(),
-      _mobileConfig = mobileConfig ?? const MobileConfig(),
-      _webConfig = webConfig ?? const WebConfig(),
-      _credentialsStorage = const SecureStorageAuthCredentialsStore(),
-      _tokenRefreshOperation = null,
-      _loginStrategy = defaultLoginStrategy {
+  }) : _clientConfig = clientConfig,
+       _desktopConfig = desktopConfig ?? const DesktopConfig(),
+       _mobileConfig = mobileConfig ?? const MobileConfig(),
+       _webConfig = webConfig ?? const WebConfig(),
+       _credentialsStorage = const SecureStorageAuthCredentialsStore(),
+       _tokenRefreshOperation = null,
+       _loginStrategy = defaultLoginStrategy {
     _createLogger(clientConfig.logLevel);
     _createInternals();
   }
@@ -107,13 +106,20 @@ final class KeycloakClient {
       IDesktopLoginStrategy() => desktopOverride ?? strategy,
       IMobileLoginStrategy() => mobileOverride ?? strategy,
       IWebLoginStrategy() => webOverride ?? strategy,
-      _ => throw StateError('Unknown login strategy type: ${strategy.runtimeType}'),
+      _ => throw StateError(
+        'Unknown login strategy type: ${strategy.runtimeType}',
+      ),
     };
   }
 
   void _createLogger(LogLevel logLevel) {
     _logger = Logger(
-      printer: PrettyPrinter(methodCount: 0, errorMethodCount: 5, lineLength: 80, colors: true),
+      printer: PrettyPrinter(
+        methodCount: 0,
+        errorMethodCount: 5,
+        lineLength: 80,
+        colors: true,
+      ),
       level: switch (logLevel) {
         LogLevel.trace => Level.trace,
         LogLevel.debug => Level.debug,
@@ -143,10 +149,12 @@ final class KeycloakClient {
   AuthState get authState => _sessionManager.authState;
 
   /// Emits the current [UserInfo] immediately on listen, then on every change.
-  Stream<UserInfo?> get onUserChange => _bufferedStream(_sessionManager.userStream, () => currentUser);
+  Stream<UserInfo?> get onUserChange =>
+      _bufferedStream(_sessionManager.userStream, () => currentUser);
 
   /// Emits the current [AuthState] immediately on listen, then on every change.
-  Stream<AuthState> get onAuthChange => _bufferedStream(_sessionManager.authStream, () => authState);
+  Stream<AuthState> get onAuthChange =>
+      _bufferedStream(_sessionManager.authStream, () => authState);
 
   Stream<T> _bufferedStream<T>(Stream<T> broadcast, T Function() current) {
     _assertNotDisposed();
@@ -203,45 +211,45 @@ final class KeycloakClient {
     _initCompleter = Completer<void>();
 
     Future(() async {
-      final stored = await _credentialsStorage.getCredentials();
-      final user = await _credentialsStorage.getUser();
+          final stored = await _credentialsStorage.getCredentials();
+          final user = await _credentialsStorage.getUser();
 
-      if (stored == null || user == null) {
-        _logger.i('No stored credentials. User needs to sign in.');
-        _sessionManager.endSession(AuthState.signedOut);
-        return;
-      }
+          if (stored == null || user == null) {
+            _logger.i('No stored credentials. User needs to sign in.');
+            _sessionManager.endSession(AuthState.signedOut);
+            return;
+          }
 
-      if (stored.isRefreshExpired) {
-        _logger.i('Refresh token expired. Clearing session.');
-        await _endSession(AuthState.sessionExpired);
-        return;
-      }
+          if (stored.isRefreshExpired) {
+            _logger.i('Refresh token expired. Clearing session.');
+            await _endSession(AuthState.sessionExpired);
+            return;
+          }
 
-      _tokenService.setClient(
-        Client(
-          stored.toOAuth2Credentials(_clientConfig.tokenEndpoint),
-          identifier: _clientConfig.clientId,
-        ),
-      );
+          _tokenService.setClient(
+            Client(
+              stored.toOAuth2Credentials(_clientConfig.tokenEndpoint),
+              identifier: _clientConfig.clientId,
+            ),
+          );
 
-      if (stored.isAccessExpired) {
-        _logger.i('Access token expired, refreshing on init.');
-        final result = await _tokenService.attemptRefresh();
-        if (result is RefreshPermanentFailure) return;
-        // Offline-first: start the session with the cached user profile so the
-        // app is usable immediately; _reloadUser() will patch it up on recovery.
-        _sessionManager.beginSession(user);
-        // Only re-fetch user info when refresh actually succeeded.
-        // On transient failure, onRecovery fires _reloadUser() when network returns.
-        // Note: TokenService._handleTransientFailure already called scheduleRefresh.
-        if (result is RefreshSuccess) _reloadUser().ignore();
-      } else {
-        _sessionManager.beginSession(user);
-        _tokenService.scheduleRefresh(stored);
-        _reloadUser().ignore();
-      }
-    })
+          if (stored.isAccessExpired) {
+            _logger.i('Access token expired, refreshing on init.');
+            final result = await _tokenService.attemptRefresh();
+            if (result is RefreshPermanentFailure) return;
+            // Offline-first: start the session with the cached user profile so the
+            // app is usable immediately; _reloadUser() will patch it up on recovery.
+            _sessionManager.beginSession(user);
+            // Only re-fetch user info when refresh actually succeeded.
+            // On transient failure, onRecovery fires _reloadUser() when network returns.
+            // Note: TokenService._handleTransientFailure already called scheduleRefresh.
+            if (result is RefreshSuccess) _reloadUser().ignore();
+          } else {
+            _sessionManager.beginSession(user);
+            _tokenService.scheduleRefresh(stored);
+            _reloadUser().ignore();
+          }
+        })
         .then((_) {
           _initialized = true;
           _initCompleter!.complete();
@@ -270,10 +278,21 @@ final class KeycloakClient {
     _logger.i('Initiating login flow via ${_loginStrategy.runtimeType}.');
 
     final client = await switch (_loginStrategy) {
-      final IDesktopLoginStrategy strategy => strategy.login(platformConfig: _desktopConfig, clientConfig: _clientConfig),
-      final IMobileLoginStrategy strategy => strategy.login(platformConfig: _mobileConfig, clientConfig: _clientConfig),
-      final IWebLoginStrategy strategy => strategy.login(platformConfig: _webConfig, clientConfig: _clientConfig),
-      _ => throw StateError('Unknown login strategy type: ${_loginStrategy.runtimeType}'),
+      final IDesktopLoginStrategy strategy => strategy.login(
+        platformConfig: _desktopConfig,
+        clientConfig: _clientConfig,
+      ),
+      final IMobileLoginStrategy strategy => strategy.login(
+        platformConfig: _mobileConfig,
+        clientConfig: _clientConfig,
+      ),
+      final IWebLoginStrategy strategy => strategy.login(
+        platformConfig: _webConfig,
+        clientConfig: _clientConfig,
+      ),
+      _ => throw StateError(
+        'Unknown login strategy type: ${_loginStrategy.runtimeType}',
+      ),
     };
 
     if (client == null) {
@@ -290,9 +309,12 @@ final class KeycloakClient {
     final credentials = UserCredentials.fromOAuth2(client.credentials);
     await _credentialsStorage.setCredentials(credentials);
     final user = await _reloadUser();
-    if (user == null) throw KeycloakServerException(0, 'Could not load user after login');
+    if (user == null)
+      throw KeycloakServerException(0, 'Could not load user after login');
     _sessionManager.beginSession(user);
-    _tokenService.scheduleRefresh(credentials); // armed AFTER session is fully established
+    _tokenService.scheduleRefresh(
+      credentials,
+    ); // armed AFTER session is fully established
   }
 
   /// Opens the Keycloak account console in an external browser so the user
@@ -328,7 +350,9 @@ final class KeycloakClient {
   Future<bool> handleWebCallback(Uri uri) async {
     final strategy = _loginStrategy;
     if (strategy is! IWebLoginStrategy) {
-      throw StateError('handleWebCallback can only be used with WebLoginStrategy.');
+      throw StateError(
+        'handleWebCallback can only be used with WebLoginStrategy.',
+      );
     }
 
     await waitForInitialization();
@@ -406,9 +430,14 @@ final class KeycloakClient {
       if (client == null) return null;
       final response = await client.get(_clientConfig.userInfoEndpoint);
       if (response.statusCode != 200) {
-        throw KeycloakServerException(response.statusCode, 'UserInfo request failed');
+        throw KeycloakServerException(
+          response.statusCode,
+          'UserInfo request failed',
+        );
       }
-      final user = UserInfo.fromApi(jsonDecode(response.body) as Map<String, dynamic>);
+      final user = UserInfo.fromApi(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
       await _credentialsStorage.setUser(user);
       _sessionManager.updateUser(user);
       _logger.i('User data reloaded: ${user.id}');
@@ -434,7 +463,9 @@ final class KeycloakClient {
     final result = await _tokenService.attemptRefresh();
     return switch (result) {
       RefreshSuccess(:final credentials) => credentials.accessToken,
-      RefreshTransientFailure(:final cause) => throw KeycloakNetworkException(cause),
+      RefreshTransientFailure(:final cause) => throw KeycloakNetworkException(
+        cause,
+      ),
       RefreshPermanentFailure() => null,
     };
   }

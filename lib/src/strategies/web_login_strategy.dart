@@ -29,14 +29,20 @@ final class WebLoginStrategy implements IWebLoginStrategy {
 
   /// Test-only constructor — inject a fake [store] and a [redirect] that
   /// records the URL instead of navigating the tab.
-  WebLoginStrategy.withDependencies({required IPendingGrantStore store, required void Function(Uri) redirect}) : _store = store;
+  WebLoginStrategy.withDependencies({
+    required IPendingGrantStore store,
+    required void Function(Uri) redirect,
+  }) : _store = store;
 
   static void _defaultRedirect(Uri authUrl) {
     window.location.href = authUrl.toString();
   }
 
   @override
-  Future<Client?> login({required WebConfig platformConfig, required ClientConfig clientConfig}) async {
+  Future<Client?> login({
+    required WebConfig platformConfig,
+    required ClientConfig clientConfig,
+  }) async {
     final verifier = _generateCodeVerifier();
     final state = _generateState();
 
@@ -49,7 +55,11 @@ final class WebLoginStrategy implements IWebLoginStrategy {
     );
 
     final redirect = Uri.parse(platformConfig.redirectUri);
-    final authUrl = grant.getAuthorizationUrl(redirect, scopes: clientConfig.scopes, state: state);
+    final authUrl = grant.getAuthorizationUrl(
+      redirect,
+      scopes: clientConfig.scopes,
+      state: state,
+    );
 
     _store.put(
       PendingGrant(
@@ -100,7 +110,11 @@ final class WebLoginStrategy implements IWebLoginStrategy {
     // oauth2 requires getAuthorizationUrl to be called once before
     // handleAuthorizationResponse so the grant moves into the
     // "awaiting response" state.
-    grant.getAuthorizationUrl(pending.redirectUri, scopes: pending.scopes, state: state);
+    grant.getAuthorizationUrl(
+      pending.redirectUri,
+      scopes: pending.scopes,
+      state: state,
+    );
 
     try {
       return await grant.handleAuthorizationResponse(params);
@@ -111,11 +125,15 @@ final class WebLoginStrategy implements IWebLoginStrategy {
 
   String _generateState() {
     final rng = Random.secure();
-    return List.generate(16, (_) => rng.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+    return List.generate(
+      16,
+      (_) => rng.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
   }
 
   String _generateCodeVerifier() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
     final rng = Random.secure();
     return List.generate(64, (_) => chars[rng.nextInt(chars.length)]).join();
   }

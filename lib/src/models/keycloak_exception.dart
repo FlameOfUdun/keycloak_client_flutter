@@ -9,12 +9,15 @@ abstract class KeycloakException implements Exception {
   const KeycloakException(this.message, {this.cause});
 
   @override
-  String toString() => cause != null ? '$runtimeType: $message (caused by: $cause)' : '$runtimeType: $message';
+  String toString() => cause != null
+      ? '$runtimeType: $message (caused by: $cause)'
+      : '$runtimeType: $message';
 }
 
 /// Thrown when a network or connectivity error occurs. The operation may be retried.
 final class KeycloakNetworkException extends KeycloakException {
-  const KeycloakNetworkException([Object? cause]) : super('A network error occurred', cause: cause);
+  const KeycloakNetworkException([Object? cause])
+    : super('A network error occurred', cause: cause);
 }
 
 /// Thrown when the Keycloak server returns an HTTP error response.
@@ -22,7 +25,8 @@ final class KeycloakServerException extends KeycloakException {
   /// The HTTP status code returned by the server.
   final int statusCode;
 
-  KeycloakServerException(this.statusCode, [Object? cause]) : super('Server returned HTTP $statusCode', cause: cause);
+  KeycloakServerException(this.statusCode, [Object? cause])
+    : super('Server returned HTTP $statusCode', cause: cause);
 }
 
 /// Thrown when the refresh token is expired or absent and the session cannot be restored.

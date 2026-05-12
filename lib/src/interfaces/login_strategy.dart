@@ -13,11 +13,14 @@ abstract interface class ILoginStrategy<TConfig extends PlatformConfig> {
   });
 }
 
-abstract interface class IMobileLoginStrategy implements ILoginStrategy<MobileConfig> {}
+abstract interface class IMobileLoginStrategy
+    implements ILoginStrategy<MobileConfig> {}
 
-abstract interface class IDesktopLoginStrategy implements ILoginStrategy<DesktopConfig> {}
+abstract interface class IDesktopLoginStrategy
+    implements ILoginStrategy<DesktopConfig> {}
 
-abstract interface class IWebLoginStrategy implements ILoginStrategy<WebConfig> {
+abstract interface class IWebLoginStrategy
+    implements ILoginStrategy<WebConfig> {
   /// Resumes a redirect-based login flow using the query parameters in
   /// [callbackUri]. Returns the authorised [Client] when a pending grant
   /// for the callback's `state` was found, validated, and exchanged.

@@ -11,29 +11,31 @@ import 'package:keycloak_client/src/interfaces/auth_credentials_store.dart';
 import 'package:keycloak_client/src/models/user_credentials.dart';
 
 class MockStore extends Mock implements IAuthCredentialsStore {}
+
 class MockOAuth2Client extends Mock implements oauth2.Client {}
 
 UserCredentials _validCreds() => UserCredentials(
-      accessToken: 'test-access-token',
-      refreshToken: 'test-refresh-token',
-      accessTokenExpiry: DateTime.now().add(const Duration(minutes: 5)),
-      refreshTokenExpiry: DateTime.now().add(const Duration(days: 30)),
-    );
+  accessToken: 'test-access-token',
+  refreshToken: 'test-refresh-token',
+  accessTokenExpiry: DateTime.now().add(const Duration(minutes: 5)),
+  refreshTokenExpiry: DateTime.now().add(const Duration(days: 30)),
+);
 
 UserCredentials _expiredRefreshCreds() => UserCredentials(
-      accessToken: 'test-access-token',
-      refreshToken: 'test-refresh-token',
-      accessTokenExpiry: DateTime.now().subtract(const Duration(hours: 1)),
-      refreshTokenExpiry: DateTime.now().subtract(const Duration(hours: 1)),
-    );
+  accessToken: 'test-access-token',
+  refreshToken: 'test-refresh-token',
+  accessTokenExpiry: DateTime.now().subtract(const Duration(hours: 1)),
+  refreshTokenExpiry: DateTime.now().subtract(const Duration(hours: 1)),
+);
 
 oauth2.Credentials _oauth2Creds(UserCredentials uc) => oauth2.Credentials(
-      uc.accessToken,
-      refreshToken: uc.refreshToken,
-      expiration: uc.accessTokenExpiry,
-      tokenEndpoint:
-          Uri.parse('http://localhost/realms/test/protocol/openid-connect/token'),
-    );
+  uc.accessToken,
+  refreshToken: uc.refreshToken,
+  expiration: uc.accessTokenExpiry,
+  tokenEndpoint: Uri.parse(
+    'http://localhost/realms/test/protocol/openid-connect/token',
+  ),
+);
 
 void main() {
   late MockStore store;
@@ -100,162 +102,193 @@ void main() {
   });
 
   group('transient failure — SocketException', () {
-    test('returns RefreshTransientFailure when refresh token is still valid', () async {
-      when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
+    test(
+      'returns RefreshTransientFailure when refresh token is still valid',
+      () async {
+        when(
+          () => store.getCredentials(),
+        ).thenAnswer((_) async => _validCreds());
 
-      final service =
-          _makeService((_, __) async => throw const SocketException('offline'));
-      service.setClient(oauthClient);
+        final service = _makeService(
+          (_, __) async => throw const SocketException('offline'),
+        );
+        service.setClient(oauthClient);
 
-      final result = await service.attemptRefresh();
+        final result = await service.attemptRefresh();
 
-      expect(result, isA<RefreshTransientFailure>());
-      expect(permanentCalls, 0);
-    });
+        expect(result, isA<RefreshTransientFailure>());
+        expect(permanentCalls, 0);
+      },
+    );
 
-    test('returns RefreshPermanentFailure when refresh token is locally expired',
-        () async {
-      when(() => store.getCredentials())
-          .thenAnswer((_) async => _expiredRefreshCreds());
+    test(
+      'returns RefreshPermanentFailure when refresh token is locally expired',
+      () async {
+        when(
+          () => store.getCredentials(),
+        ).thenAnswer((_) async => _expiredRefreshCreds());
 
-      final service =
-          _makeService((_, __) async => throw const SocketException('offline'));
-      service.setClient(oauthClient);
+        final service = _makeService(
+          (_, __) async => throw const SocketException('offline'),
+        );
+        service.setClient(oauthClient);
 
-      final result = await service.attemptRefresh();
+        final result = await service.attemptRefresh();
 
-      expect(result, isA<RefreshPermanentFailure>());
-      expect(permanentCalls, 1);
-    });
+        expect(result, isA<RefreshPermanentFailure>());
+        expect(permanentCalls, 1);
+      },
+    );
   });
 
   group('transient failure — non-invalid_grant AuthorizationException', () {
-    test('returns RefreshTransientFailure when refresh token is still valid', () async {
-      when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
+    test(
+      'returns RefreshTransientFailure when refresh token is still valid',
+      () async {
+        when(
+          () => store.getCredentials(),
+        ).thenAnswer((_) async => _validCreds());
 
-      final service = _makeService(
-        (_, __) async =>
-            throw oauth2.AuthorizationException('server_error', null, null),
-      );
-      service.setClient(oauthClient);
+        final service = _makeService(
+          (_, __) async =>
+              throw oauth2.AuthorizationException('server_error', null, null),
+        );
+        service.setClient(oauthClient);
 
-      final result = await service.attemptRefresh();
+        final result = await service.attemptRefresh();
 
-      expect(result, isA<RefreshTransientFailure>());
-      expect(permanentCalls, 0);
-    });
+        expect(result, isA<RefreshTransientFailure>());
+        expect(permanentCalls, 0);
+      },
+    );
 
-    test('returns RefreshPermanentFailure when refresh token is locally expired',
-        () async {
-      when(() => store.getCredentials())
-          .thenAnswer((_) async => _expiredRefreshCreds());
+    test(
+      'returns RefreshPermanentFailure when refresh token is locally expired',
+      () async {
+        when(
+          () => store.getCredentials(),
+        ).thenAnswer((_) async => _expiredRefreshCreds());
 
-      final service = _makeService(
-        (_, __) async =>
-            throw oauth2.AuthorizationException('server_error', null, null),
-      );
-      service.setClient(oauthClient);
+        final service = _makeService(
+          (_, __) async =>
+              throw oauth2.AuthorizationException('server_error', null, null),
+        );
+        service.setClient(oauthClient);
 
-      final result = await service.attemptRefresh();
+        final result = await service.attemptRefresh();
 
-      expect(result, isA<RefreshPermanentFailure>());
-      expect(permanentCalls, 1);
-    });
+        expect(result, isA<RefreshPermanentFailure>());
+        expect(permanentCalls, 1);
+      },
+    );
   });
 
   group('permanent failure', () {
-    test('invalid_grant calls onPermanentFailure and returns RefreshPermanentFailure',
-        () async {
-      final service = _makeService(
-        (_, __) async =>
-            throw oauth2.AuthorizationException('invalid_grant', null, null),
-      );
-      service.setClient(oauthClient);
+    test(
+      'invalid_grant calls onPermanentFailure and returns RefreshPermanentFailure',
+      () async {
+        final service = _makeService(
+          (_, __) async =>
+              throw oauth2.AuthorizationException('invalid_grant', null, null),
+        );
+        service.setClient(oauthClient);
 
-      final result = await service.attemptRefresh();
+        final result = await service.attemptRefresh();
 
-      expect(result, isA<RefreshPermanentFailure>());
-      expect(permanentCalls, 1);
-    });
+        expect(result, isA<RefreshPermanentFailure>());
+        expect(permanentCalls, 1);
+      },
+    );
 
-    test('ExpirationException calls onPermanentFailure and returns RefreshPermanentFailure',
-        () async {
-      final expiredOauthCreds = _oauth2Creds(_validCreds());
-      final service = _makeService(
-        (_, __) async => throw oauth2.ExpirationException(expiredOauthCreds),
-      );
-      service.setClient(oauthClient);
+    test(
+      'ExpirationException calls onPermanentFailure and returns RefreshPermanentFailure',
+      () async {
+        final expiredOauthCreds = _oauth2Creds(_validCreds());
+        final service = _makeService(
+          (_, __) async => throw oauth2.ExpirationException(expiredOauthCreds),
+        );
+        service.setClient(oauthClient);
 
-      final result = await service.attemptRefresh();
+        final result = await service.attemptRefresh();
 
-      expect(result, isA<RefreshPermanentFailure>());
-      expect(permanentCalls, 1);
-    });
+        expect(result, isA<RefreshPermanentFailure>());
+        expect(permanentCalls, 1);
+      },
+    );
 
-    test('null client calls onPermanentFailure and returns RefreshPermanentFailure',
-        () async {
-      final service = _makeService((_, __) async => oauthClient);
-      // Do NOT call service.setClient — _oauthClient remains null
+    test(
+      'null client calls onPermanentFailure and returns RefreshPermanentFailure',
+      () async {
+        final service = _makeService((_, __) async => oauthClient);
+        // Do NOT call service.setClient — _oauthClient remains null
 
-      final result = await service.attemptRefresh();
+        final result = await service.attemptRefresh();
 
-      expect(result, isA<RefreshPermanentFailure>());
-      expect(permanentCalls, 1);
-    });
+        expect(result, isA<RefreshPermanentFailure>());
+        expect(permanentCalls, 1);
+      },
+    );
   });
 
   group('coalescing', () {
-    test('concurrent attemptRefresh calls share the same in-flight future',
-        () async {
-      var callCount = 0;
-      when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
+    test(
+      'concurrent attemptRefresh calls share the same in-flight future',
+      () async {
+        var callCount = 0;
+        when(
+          () => store.getCredentials(),
+        ).thenAnswer((_) async => _validCreds());
 
-      final service = _makeService((_, __) async {
-        callCount++;
-        throw const SocketException('offline');
-      });
-      service.setClient(oauthClient);
+        final service = _makeService((_, __) async {
+          callCount++;
+          throw const SocketException('offline');
+        });
+        service.setClient(oauthClient);
 
-      await Future.wait([
-        service.attemptRefresh(),
-        service.attemptRefresh(),
-        service.attemptRefresh(),
-      ]);
+        await Future.wait([
+          service.attemptRefresh(),
+          service.attemptRefresh(),
+          service.attemptRefresh(),
+        ]);
 
-      expect(callCount, 1);
-    });
+        expect(callCount, 1);
+      },
+    );
   });
 
   group('recovery detection', () {
-    test('calls onRecovery when transitioning from failure to success', () async {
-      when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
+    test(
+      'calls onRecovery when transitioning from failure to success',
+      () async {
+        when(
+          () => store.getCredentials(),
+        ).thenAnswer((_) async => _validCreds());
 
-      // First refresh: transient failure
-      var shouldFail = true;
-      final newCreds = _validCreds();
-      when(() => oauthClient.credentials).thenReturn(_oauth2Creds(newCreds));
-      when(() => store.setCredentials(any())).thenAnswer((_) async {});
+        // First refresh: transient failure
+        var shouldFail = true;
+        final newCreds = _validCreds();
+        when(() => oauthClient.credentials).thenReturn(_oauth2Creds(newCreds));
+        when(() => store.setCredentials(any())).thenAnswer((_) async {});
 
-      final service = _makeService(
-        (_, __) async {
+        final service = _makeService((_, __) async {
           if (shouldFail) throw const SocketException('offline');
           return oauthClient;
-        },
-      );
-      service.setClient(oauthClient);
+        });
+        service.setClient(oauthClient);
 
-      // First call fails — sets _previousRefreshFailed = true
-      await service.attemptRefresh();
-      expect(recoveryCalls, 0);
+        // First call fails — sets _previousRefreshFailed = true
+        await service.attemptRefresh();
+        expect(recoveryCalls, 0);
 
-      // Allow new completer (prior one is completed)
-      shouldFail = false;
+        // Allow new completer (prior one is completed)
+        shouldFail = false;
 
-      // Second call succeeds — should call onRecovery
-      await service.attemptRefresh();
-      expect(recoveryCalls, 1);
-      service.dispose();
-    });
+        // Second call succeeds — should call onRecovery
+        await service.attemptRefresh();
+        expect(recoveryCalls, 1);
+        service.dispose();
+      },
+    );
 
     test('does not call onRecovery when first refresh succeeds', () async {
       final newCreds = _validCreds();
@@ -289,21 +322,25 @@ void main() {
       service.dispose();
     });
 
-    test('hanging refresh with locally expired refresh token ends session', () async {
-      when(() => store.getCredentials())
-          .thenAnswer((_) async => _expiredRefreshCreds());
+    test(
+      'hanging refresh with locally expired refresh token ends session',
+      () async {
+        when(
+          () => store.getCredentials(),
+        ).thenAnswer((_) async => _expiredRefreshCreds());
 
-      final service = _makeService(
-        (_, __) => Completer<oauth2.Client>().future,
-        refreshTimeout: const Duration(milliseconds: 100),
-      );
-      service.setClient(oauthClient);
+        final service = _makeService(
+          (_, __) => Completer<oauth2.Client>().future,
+          refreshTimeout: const Duration(milliseconds: 100),
+        );
+        service.setClient(oauthClient);
 
-      final result = await service.attemptRefresh();
+        final result = await service.attemptRefresh();
 
-      expect(result, isA<RefreshPermanentFailure>());
-      expect(permanentCalls, 1);
-      service.dispose();
-    });
+        expect(result, isA<RefreshPermanentFailure>());
+        expect(permanentCalls, 1);
+        service.dispose();
+      },
+    );
   });
 }

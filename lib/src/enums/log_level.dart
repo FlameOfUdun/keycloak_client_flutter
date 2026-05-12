@@ -19,5 +19,5 @@ enum LogLevel {
   fatal,
 
   /// Off level to disable all logging.
-  off;
+  off,
 }

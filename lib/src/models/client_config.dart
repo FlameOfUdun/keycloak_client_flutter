@@ -36,9 +36,23 @@ final class ClientConfig {
     this.refreshTimeout = const Duration(seconds: 15),
   });
 
-  Uri get authorizationEndpoint => Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/auth');
-  Uri get tokenEndpoint => Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/token');
-  Uri get userInfoEndpoint => Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/userinfo');
-  Uri get logoutEndpoint => Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/logout');
+  /// Constructs the standard Keycloak endpoints based on [baseUrl] and [realm].
+  Uri get authorizationEndpoint =>
+      Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/auth');
+
+  /// The token endpoint is used for both the initial token exchange and refresh.
+  Uri get tokenEndpoint =>
+      Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/token');
+
+  /// The userinfo endpoint is used to fetch user profile information after login.
+  Uri get userInfoEndpoint =>
+      Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/userinfo');
+
+  /// The logout endpoint is used to revoke tokens and end the session at Keycloak.
+  Uri get logoutEndpoint =>
+      Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/logout');
+
+  /// The account management endpoint is where users can manage their Keycloak account.
+  /// Not used by the client but provided for convenience.
   Uri get accountEndpoint => Uri.parse('$baseUrl/realms/$realm/account');
 }

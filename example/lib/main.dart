@@ -3,7 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:keycloak_client/keycloak_client.dart';
 
 final client = KeycloakClient(
-  clientConfig: ClientConfig(baseUrl: 'http://localhost:8080', realm: 'smartairway', clientId: 'smartairway-app', refreshTimeout: const Duration(seconds: 3)),
+  clientConfig: ClientConfig(
+    baseUrl: 'http://localhost:8080',
+    realm: 'smartairway',
+    clientId: 'smartairway-app',
+    refreshTimeout: const Duration(seconds: 3),
+  ),
 );
 
 void main() async {
@@ -98,8 +103,15 @@ final class _LoginScreen extends StatelessWidget {
           spacing: 16,
           children: [
             const Icon(Icons.lock_outline, size: 64, color: Colors.teal),
-            Text('Sign in to continue', style: Theme.of(context).textTheme.titleLarge),
-            FilledButton.icon(onPressed: client.login, icon: const Icon(Icons.login), label: const Text('Sign in with Keycloak')),
+            Text(
+              'Sign in to continue',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            FilledButton.icon(
+              onPressed: client.login,
+              icon: const Icon(Icons.login),
+              label: const Text('Sign in with Keycloak'),
+            ),
           ],
         ),
       ),
@@ -119,10 +131,21 @@ final class _SessionExpiredScreen extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           spacing: 16,
           children: [
-            const Icon(Icons.timer_off_outlined, size: 64, color: Colors.orange),
-            Text('Your session has expired', style: Theme.of(context).textTheme.titleLarge),
+            const Icon(
+              Icons.timer_off_outlined,
+              size: 64,
+              color: Colors.orange,
+            ),
+            Text(
+              'Your session has expired',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const Text('Please sign in again to continue.'),
-            FilledButton.icon(onPressed: client.login, icon: const Icon(Icons.login), label: const Text('Sign in again')),
+            FilledButton.icon(
+              onPressed: client.login,
+              icon: const Icon(Icons.login),
+              label: const Text('Sign in again'),
+            ),
           ],
         ),
       ),
@@ -140,8 +163,16 @@ final class _HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Home'),
         actions: [
-          IconButton(tooltip: 'Manage account', icon: const Icon(Icons.manage_accounts), onPressed: client.manageAccount),
-          IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: client.logout),
+          IconButton(
+            tooltip: 'Manage account',
+            icon: const Icon(Icons.manage_accounts),
+            onPressed: client.manageAccount,
+          ),
+          IconButton(
+            tooltip: 'Sign out',
+            icon: const Icon(Icons.logout),
+            onPressed: client.logout,
+          ),
         ],
       ),
       body: Center(child: _UserInfoCard(client: client)),
@@ -179,13 +210,31 @@ final class _UserInfoCard extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               spacing: 8,
               children: [
-                CircleAvatar(radius: 32, child: Text((user.username ?? user.email ?? '?')[0].toUpperCase(), style: const TextStyle(fontSize: 28))),
-                if (user.username != null) Text(user.username!, style: Theme.of(context).textTheme.titleMedium),
-                if (user.email != null) Text(user.email!, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey)),
+                CircleAvatar(
+                  radius: 32,
+                  child: Text(
+                    (user.username ?? user.email ?? '?')[0].toUpperCase(),
+                    style: const TextStyle(fontSize: 28),
+                  ),
+                ),
+                if (user.username != null)
+                  Text(
+                    user.username!,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                if (user.email != null)
+                  Text(
+                    user.email!,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+                  ),
                 const Divider(),
                 _InfoRow(label: 'ID', value: user.id),
-                if (user.givenName != null) _InfoRow(label: 'First name', value: user.givenName!),
-                if (user.familyName != null) _InfoRow(label: 'Last name', value: user.familyName!),
+                if (user.givenName != null)
+                  _InfoRow(label: 'First name', value: user.givenName!),
+                if (user.familyName != null)
+                  _InfoRow(label: 'Last name', value: user.familyName!),
               ],
             ),
           ),

@@ -1,3 +1,5 @@
+/// Defines platform-specific configuration options for the authentication flow, including
+/// redirect URIs, timeouts, and other settings that may differ between mobile, desktop, and web platforms.
 sealed class PlatformConfig {
   /// The redirect URI that the authentication provider will use to return to
   /// the app after the user completes the login process. This should be a URI
@@ -5,32 +7,30 @@ sealed class PlatformConfig {
   /// URL for desktop and web. The default values are set to common patterns, but
   /// you should customize this to match your app's configuration and ensure it is
   /// registered correctly with your authentication provider.
-  /// 
-  /// For mobile, the default is `myapp://auth`, which is a common custom scheme pattern. 
-  /// 
-  /// For desktop and web, the default is `https://winchetechnologies.co.uk/tools/oauth_redirect`, 
+  ///
+  /// For mobile, the default is `myapp://auth`, which is a common custom scheme pattern.
+  ///
+  /// For desktop and web, the default is `https://winchetechnologies.co.uk/tools/oauth_redirect`,
   /// which is a placeholder URL that you should replace with your own registered redirect URI.
-  /// Since latest versions of keycloak prohibits using localhost redirect URIs, you can register 
-  /// the default desktop redirect URI with your Keycloak server and use it as is, 
+  /// Since latest versions of keycloak prohibits using localhost redirect URIs, you can register
+  /// the default desktop redirect URI with your Keycloak server and use it as is,
   /// or customize it to match your app's branding and domain.
   final String redirectUri;
 
-  const PlatformConfig({
-    required this.redirectUri,
-  });
+  const PlatformConfig({required this.redirectUri});
 }
 
-/// Placeholder for future mobile-only login settings.
+/// Mobile-specific configuration options, such as deep link timeout.
 final class MobileConfig extends PlatformConfig {
   /// The maximum time to wait for the deep link callback after launching the
   /// browser for login before giving up and throwing a timeout error. This is
   /// important to prevent the app from waiting indefinitely if the user abandons
   /// the login process after the browser is launched.
-  /// 
-  /// Default is 5 minutes, which should be more than enough for any user to 
-  /// complete the login process, even if they need to reset their password or 
-  /// perform multi-factor authentication. You can adjust this timeout based 
-  /// on your user base and expected login flow complexity, but it's generally 
+  ///
+  /// Default is 5 minutes, which should be more than enough for any user to
+  /// complete the login process, even if they need to reset their password or
+  /// perform multi-factor authentication. You can adjust this timeout based
+  /// on your user base and expected login flow complexity, but it's generally
   /// not recommended to set it too low to avoid cutting off users who may need more time.
   final Duration deepLinkTimeout;
 
@@ -40,6 +40,7 @@ final class MobileConfig extends PlatformConfig {
   });
 }
 
+/// Configuration options specific to desktop platforms, such as loopback server settings and custom success page HTML.
 final class DesktopConfig extends PlatformConfig {
   /// The local callback URL that the desktop listener expects after the
   /// browser flow returns to the app.
@@ -75,7 +76,7 @@ final class DesktopConfig extends PlatformConfig {
   });
 }
 
-/// Placeholder for future web-only login settings.
+/// Configuration options specific to web platforms, such as pending grant TTL and custom URL launch callback.
 final class WebConfig extends PlatformConfig {
   /// The TTL for pending grants stored during the redirect-based login flow.
   ///
@@ -91,8 +92,10 @@ final class WebConfig extends PlatformConfig {
   /// on web platforms. The callback should handle opening the URL and can be
   /// used to integrate with your app's routing or state management if needed.
   final void Function(Uri authUrl)? launchAuthUrl;
-  
+
   const WebConfig({
     super.redirectUri = 'https://winchetechnologies.co.uk/tools/oauth_redirect',
-    this.pendingGrantTTL = const Duration(minutes: 15), this.launchAuthUrl});
+    this.pendingGrantTTL = const Duration(minutes: 15),
+    this.launchAuthUrl,
+  });
 }
