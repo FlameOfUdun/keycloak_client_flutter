@@ -43,8 +43,16 @@ sealed class AccountCredential {
     final type = json['type'] as String;
     final category = (json['category'] as String?) ?? '';
     final displayName = json['displayName'] as String?;
-    final raw = (json['userCredentials'] as List<dynamic>?) ?? const [];
-    final maps = raw.whereType<Map<String, dynamic>>().toList(growable: false);
+    // Keycloak's account REST API returns instances under `userCredentialMetadatas`,
+    // each wrapped in a metadata envelope with the credential under `.credential`.
+    // Older/alternative shapes use `userCredentials` directly — accept both.
+    final raw = (json['userCredentialMetadatas'] as List<dynamic>?) ??
+        (json['userCredentials'] as List<dynamic>?) ??
+        const [];
+    final maps = raw.whereType<Map<String, dynamic>>().map((entry) {
+      final inner = entry['credential'];
+      return inner is Map<String, dynamic> ? inner : entry;
+    }).toList(growable: false);
 
     return switch (type) {
       'password' => PasswordCredential(

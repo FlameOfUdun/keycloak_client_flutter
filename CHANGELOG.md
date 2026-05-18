@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 2.1.1
+
+### Bug Fixes
+
+- `AccountCredential.fromJson` now reads instances from the correct field on
+  the Keycloak response. Keycloak's account REST API returns configured
+  instances under `userCredentialMetadatas` (each wrapped in a metadata
+  envelope with the actual credential under `.credential`), not
+  `userCredentials`. The previous lookup missed every entry and reported
+  `instanceCount: 0` / `isConfigured: false` for credentials the user had
+  actually configured. The parser now reads `userCredentialMetadatas` first
+  and unwraps each envelope, falling back to the flat `userCredentials`
+  shape for compatibility with older or alternative response paths.
+
 ## 2.1.0
 
 ### New
