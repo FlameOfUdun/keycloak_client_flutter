@@ -53,6 +53,10 @@ final class ClientConfig {
       Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/logout');
 
   /// The account management endpoint is where users can manage their Keycloak account.
-  /// Not used by the client but provided for convenience.
   Uri get accountEndpoint => Uri.parse('$baseUrl/realms/$realm/account');
+
+  /// The account credentials endpoint. Returns the list of credential
+  /// containers configured for the authenticated user.
+  Uri get accountCredentialsEndpoint =>
+      Uri.parse('$baseUrl/realms/$realm/account/credentials');
 }

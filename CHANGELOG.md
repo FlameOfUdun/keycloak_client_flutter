@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 2.1.0
+
+### New
+
+- `getAccountCredentials()` — queries Keycloak's account REST API
+  (`/realms/{realm}/account/credentials`) and returns the list of credential
+  types configured for the current user as a sealed `AccountCredential`
+  family. Subtypes (`PasswordCredential`, `OtpCredential`,
+  `WebAuthnCredential`) expose per-type fields parsed from the response,
+  including OTP `subType`/`digits`/`period`/`algorithm` and WebAuthn
+  `aaguid`. Unknown credential types fall back to `UnknownCredential` so
+  realm-specific or future credential providers don't break the client.
+- `ClientConfig.accountCredentialsEndpoint` — exposed for completeness.
+
 ## 2.0.0
 
 ### Breaking Changes

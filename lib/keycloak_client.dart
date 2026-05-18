@@ -17,6 +17,7 @@ import 'src/interfaces/auth_credentials_store.dart';
 import 'src/models/client_config.dart';
 import 'src/models/keycloak_exception.dart';
 import 'src/models/platform_config.dart';
+import 'src/models/account_credential.dart';
 import 'src/models/user_credentials.dart';
 import 'src/models/user_info.dart';
 import 'src/interfaces/login_strategy.dart';
@@ -26,6 +27,7 @@ import 'src/utilities/secure_storage_auth_credentials_store.dart';
 export 'src/enums/auth_state.dart';
 export 'src/enums/log_level.dart';
 export 'src/models/client_config.dart';
+export 'src/models/account_credential.dart';
 export 'src/models/keycloak_exception.dart';
 export 'src/models/user_credentials.dart';
 export 'src/models/user_info.dart';
@@ -54,18 +56,14 @@ final class KeycloakClient {
   bool _disposed = false;
 
   /// Creates a [KeycloakClient] from a single configuration object.
-  KeycloakClient({
-    required ClientConfig clientConfig,
-    WebConfig? webConfig,
-    MobileConfig? mobileConfig,
-    DesktopConfig? desktopConfig,
-  }) : _clientConfig = clientConfig,
-       _desktopConfig = desktopConfig ?? const DesktopConfig(),
-       _mobileConfig = mobileConfig ?? const MobileConfig(),
-       _webConfig = webConfig ?? const WebConfig(),
-       _credentialsStorage = const SecureStorageAuthCredentialsStore(),
-       _tokenRefreshOperation = null,
-       _loginStrategy = defaultLoginStrategy {
+  KeycloakClient({required ClientConfig clientConfig, WebConfig? webConfig, MobileConfig? mobileConfig, DesktopConfig? desktopConfig})
+    : _clientConfig = clientConfig,
+      _desktopConfig = desktopConfig ?? const DesktopConfig(),
+      _mobileConfig = mobileConfig ?? const MobileConfig(),
+      _webConfig = webConfig ?? const WebConfig(),
+      _credentialsStorage = const SecureStorageAuthCredentialsStore(),
+      _tokenRefreshOperation = null,
+      _loginStrategy = defaultLoginStrategy {
     _createLogger(clientConfig.logLevel);
     _createInternals();
   }
@@ -106,20 +104,13 @@ final class KeycloakClient {
       IDesktopLoginStrategy() => desktopOverride ?? strategy,
       IMobileLoginStrategy() => mobileOverride ?? strategy,
       IWebLoginStrategy() => webOverride ?? strategy,
-      _ => throw StateError(
-        'Unknown login strategy type: ${strategy.runtimeType}',
-      ),
+      _ => throw StateError('Unknown login strategy type: ${strategy.runtimeType}'),
     };
   }
 
   void _createLogger(LogLevel logLevel) {
     _logger = Logger(
-      printer: PrettyPrinter(
-        methodCount: 0,
-        errorMethodCount: 5,
-        lineLength: 80,
-        colors: true,
-      ),
+      printer: PrettyPrinter(methodCount: 0, errorMethodCount: 5, lineLength: 80, colors: true),
       level: switch (logLevel) {
         LogLevel.trace => Level.trace,
         LogLevel.debug => Level.debug,
@@ -149,12 +140,10 @@ final class KeycloakClient {
   AuthState get authState => _sessionManager.authState;
 
   /// Emits the current [UserInfo] immediately on listen, then on every change.
-  Stream<UserInfo?> get onUserChange =>
-      _bufferedStream(_sessionManager.userStream, () => currentUser);
+  Stream<UserInfo?> get onUserChange => _bufferedStream(_sessionManager.userStream, () => currentUser);
 
   /// Emits the current [AuthState] immediately on listen, then on every change.
-  Stream<AuthState> get onAuthChange =>
-      _bufferedStream(_sessionManager.authStream, () => authState);
+  Stream<AuthState> get onAuthChange => _bufferedStream(_sessionManager.authStream, () => authState);
 
   Stream<T> _bufferedStream<T>(Stream<T> broadcast, T Function() current) {
     _assertNotDisposed();
@@ -226,12 +215,7 @@ final class KeycloakClient {
             return;
           }
 
-          _tokenService.setClient(
-            Client(
-              stored.toOAuth2Credentials(_clientConfig.tokenEndpoint),
-              identifier: _clientConfig.clientId,
-            ),
-          );
+          _tokenService.setClient(Client(stored.toOAuth2Credentials(_clientConfig.tokenEndpoint), identifier: _clientConfig.clientId));
 
           if (stored.isAccessExpired) {
             _logger.i('Access token expired, refreshing on init.');
@@ -278,21 +262,10 @@ final class KeycloakClient {
     _logger.i('Initiating login flow via ${_loginStrategy.runtimeType}.');
 
     final client = await switch (_loginStrategy) {
-      final IDesktopLoginStrategy strategy => strategy.login(
-        platformConfig: _desktopConfig,
-        clientConfig: _clientConfig,
-      ),
-      final IMobileLoginStrategy strategy => strategy.login(
-        platformConfig: _mobileConfig,
-        clientConfig: _clientConfig,
-      ),
-      final IWebLoginStrategy strategy => strategy.login(
-        platformConfig: _webConfig,
-        clientConfig: _clientConfig,
-      ),
-      _ => throw StateError(
-        'Unknown login strategy type: ${_loginStrategy.runtimeType}',
-      ),
+      final IDesktopLoginStrategy strategy => strategy.login(platformConfig: _desktopConfig, clientConfig: _clientConfig),
+      final IMobileLoginStrategy strategy => strategy.login(platformConfig: _mobileConfig, clientConfig: _clientConfig),
+      final IWebLoginStrategy strategy => strategy.login(platformConfig: _webConfig, clientConfig: _clientConfig),
+      _ => throw StateError('Unknown login strategy type: ${_loginStrategy.runtimeType}'),
     };
 
     if (client == null) {
@@ -309,12 +282,57 @@ final class KeycloakClient {
     final credentials = UserCredentials.fromOAuth2(client.credentials);
     await _credentialsStorage.setCredentials(credentials);
     final user = await _reloadUser();
-    if (user == null)
+    if (user == null) {
       throw KeycloakServerException(0, 'Could not load user after login');
+    }
     _sessionManager.beginSession(user);
-    _tokenService.scheduleRefresh(
-      credentials,
-    ); // armed AFTER session is fully established
+    _tokenService.scheduleRefresh(credentials); // armed AFTER session is fully established
+  }
+
+  /// Fetches the credentials configured for the current user from Keycloak's
+  /// account REST API (`/realms/{realm}/account/credentials`).
+  ///
+  /// Each entry is a sealed [AccountCredential] subtype carrying type-specific
+  /// fields ([PasswordCredential], [OtpCredential], [WebAuthnCredential], or
+  /// [UnknownCredential] for realm-specific or future providers). Inspect
+  /// [AccountCredential.isConfigured] to check whether the user has set up a
+  /// given type.
+  ///
+  /// Returns an empty list when no session exists.
+  /// Throws [KeycloakNetworkException] on transport failure and
+  /// [KeycloakServerException] on a non-2xx response.
+  Future<List<AccountCredential>> getAccountCredentials() async {
+    await waitForInitialization();
+
+    final token = await getAuthToken();
+    if (token == null) return const [];
+
+    final client = _tokenService.oauthClient;
+    if (client == null) return const [];
+
+    try {
+      // Accept header is load-bearing: Keycloak content-negotiates the
+      // /account/credentials URL and serves the account-console HTML to any
+      // request that doesn't explicitly ask for JSON.
+      final response = await client.get(
+        _clientConfig.accountCredentialsEndpoint,
+        headers: const {'Accept': 'application/json'},
+      );
+      if (response.statusCode != 200) {
+        throw KeycloakServerException(response.statusCode, 'Credentials request failed');
+      }
+      final body = jsonDecode(response.body);
+      if (body is! List) {
+        throw KeycloakServerException(response.statusCode, 'Unexpected credentials response shape');
+      }
+      return body.whereType<Map<String, dynamic>>().map(AccountCredential.fromJson).toList(growable: false);
+    } on KeycloakException catch (e) {
+      _logger.e('Failed to fetch account credentials.', error: e);
+      rethrow;
+    } catch (e, s) {
+      _logger.e('Failed to fetch account credentials.', error: e, stackTrace: s);
+      throw KeycloakNetworkException(e);
+    }
   }
 
   /// Opens the Keycloak account console in an external browser so the user
@@ -350,9 +368,7 @@ final class KeycloakClient {
   Future<bool> handleWebCallback(Uri uri) async {
     final strategy = _loginStrategy;
     if (strategy is! IWebLoginStrategy) {
-      throw StateError(
-        'handleWebCallback can only be used with WebLoginStrategy.',
-      );
+      throw StateError('handleWebCallback can only be used with WebLoginStrategy.');
     }
 
     await waitForInitialization();
@@ -430,14 +446,9 @@ final class KeycloakClient {
       if (client == null) return null;
       final response = await client.get(_clientConfig.userInfoEndpoint);
       if (response.statusCode != 200) {
-        throw KeycloakServerException(
-          response.statusCode,
-          'UserInfo request failed',
-        );
+        throw KeycloakServerException(response.statusCode, 'UserInfo request failed');
       }
-      final user = UserInfo.fromApi(
-        jsonDecode(response.body) as Map<String, dynamic>,
-      );
+      final user = UserInfo.fromApi(jsonDecode(response.body) as Map<String, dynamic>);
       await _credentialsStorage.setUser(user);
       _sessionManager.updateUser(user);
       _logger.i('User data reloaded: ${user.id}');
@@ -463,9 +474,7 @@ final class KeycloakClient {
     final result = await _tokenService.attemptRefresh();
     return switch (result) {
       RefreshSuccess(:final credentials) => credentials.accessToken,
-      RefreshTransientFailure(:final cause) => throw KeycloakNetworkException(
-        cause,
-      ),
+      RefreshTransientFailure(:final cause) => throw KeycloakNetworkException(cause),
       RefreshPermanentFailure() => null,
     };
   }

@@ -9,12 +9,13 @@ Cross-platform Keycloak authentication for Flutter with:
 - secure credential persistence
 - automatic token refresh
 - auth and user streams
+- typed read of the user's configured authentication methods (password, OTP, WebAuthn)
 
 ## Install
 
 ```yaml
 dependencies:
-  keycloak_client: ^2.0.0
+  keycloak_client: ^2.1.0
 ```
 
 ## Quick Start
@@ -150,6 +151,40 @@ void main() async {
 ```
 
 On web, `login()` redirects the current tab and does not complete before navigation.
+
+## Account Credentials
+
+Read the authentication methods the current user has configured (password, OTP, WebAuthn, …) from Keycloak's account REST API:
+
+```dart
+final credentials = await client.getAccountCredentials();
+```
+
+Results are returned as a sealed `AccountCredential` family. Pattern match to access type-specific fields:
+
+```dart
+for (final credential in credentials) {
+  switch (credential) {
+    case PasswordCredential():
+      print('Password: ${credential.isConfigured ? 'set' : 'not set'}');
+    case OtpCredential(:final instances):
+      for (final otp in instances) {
+        print('OTP: ${otp.userLabel} (${otp.subType.name}, ${otp.digits} digits)');
+      }
+    case WebAuthnCredential(:final instances):
+      for (final key in instances) {
+        print('WebAuthn: ${key.userLabel} (aaguid=${key.aaguid})');
+      }
+    case UnknownCredential():
+      // Realm-specific or future credential provider — inspect raw `credentialData`.
+      print('${credential.type}: ${credential.instanceCount} configured');
+  }
+}
+```
+
+Each `AccountCredential` exposes `type`, `category`, `displayName`, `instanceCount`, and `isConfigured`. Per-type instance models carry the common `id` / `userLabel` / `createdDate` plus the fields shown above (OTP `subType`/`digits`/`period`/`algorithm`, WebAuthn `aaguid`). `UnknownCredential` carries the raw `credentialData` map so realm-specific or future providers don't break parsing.
+
+Account credentials are queried on demand and not cached — the source of truth is Keycloak. If your UI needs offline-first reads, memoize the result in your app.
 
 ## Streams
 
@@ -289,6 +324,7 @@ Always:
 - `getAuthToken()`: return a valid access token, `null` if no session, or throw `KeycloakNetworkException` if offline with a valid session
 - `refreshToken()`: force an immediate token refresh and user profile reload regardless of token expiry — useful after account management or role changes; throws `KeycloakNetworkException` if offline
 - `reloadUser()`: reload profile data from `/userinfo`
+- `getAccountCredentials()`: list the user's configured authentication methods as a sealed `AccountCredential` family
 - `manageAccount()`: open Keycloak account console in external browser
 - `onAuthChange`: stream of `AuthState`
 - `onUserChange`: stream of `UserInfo?`

@@ -4,9 +4,9 @@ import 'package:keycloak_client/keycloak_client.dart';
 
 final client = KeycloakClient(
   clientConfig: ClientConfig(
-    baseUrl: 'http://localhost:8080',
-    realm: 'smartairway',
-    clientId: 'smartairway-app',
+    baseUrl: 'your-keycloak-server',
+    realm: 'your-realm',
+    clientId: 'your-client-id',
     refreshTimeout: const Duration(seconds: 3),
   ),
 );
@@ -175,7 +175,21 @@ final class _HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: Center(child: _UserInfoCard(client: client)),
+      body: SingleChildScrollView(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _UserInfoCard(client: client),
+                _CredentialsCard(client: client),
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -240,6 +254,117 @@ final class _UserInfoCard extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+final class _CredentialsCard extends StatefulWidget {
+  final KeycloakClient client;
+  const _CredentialsCard({required this.client});
+
+  @override
+  State<_CredentialsCard> createState() => _CredentialsCardState();
+}
+
+final class _CredentialsCardState extends State<_CredentialsCard> {
+  late Future<List<AccountCredential>> _future =
+      widget.client.getAccountCredentials();
+
+  void _refresh() {
+    setState(() {
+      _future = widget.client.getAccountCredentials();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 24),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Authentication methods',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                IconButton(
+                  tooltip: 'Refresh',
+                  icon: const Icon(Icons.refresh, size: 20),
+                  onPressed: _refresh,
+                ),
+              ],
+            ),
+            FutureBuilder<List<AccountCredential>>(
+              future: _future,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                if (snapshot.hasError) {
+                  return _ErrorTile(message: '${snapshot.error}');
+                }
+                final credentials = snapshot.data ?? const [];
+                if (credentials.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text('No credentials configured.'),
+                  );
+                }
+                return Column(
+                  children: credentials.map(_credentialTile).toList(),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _credentialTile(AccountCredential credential) {
+    // Pattern match on the sealed family for type-specific rendering.
+    final (IconData icon, String subtitle) = switch (credential) {
+      PasswordCredential() => (
+        Icons.password,
+        credential.isConfigured ? 'Configured' : 'Not configured',
+      ),
+      OtpCredential(:final instances) => (
+        Icons.security,
+        instances.isEmpty
+            ? 'Not configured'
+            : instances
+                  .map((i) => '${i.userLabel ?? 'OTP'} · ${i.subType.name}')
+                  .join(', '),
+      ),
+      WebAuthnCredential(:final instances) => (
+        Icons.fingerprint,
+        instances.isEmpty
+            ? 'Not configured'
+            : instances.map((i) => i.userLabel ?? 'Authenticator').join(', '),
+      ),
+      UnknownCredential() => (
+        Icons.help_outline,
+        '${credential.instanceCount} configured',
+      ),
+    };
+
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon),
+      title: Text(credential.displayName ?? credential.type),
+      subtitle: Text(subtitle),
+      trailing: credential.isConfigured
+          ? const Icon(Icons.check_circle, color: Colors.green, size: 18)
+          : const Icon(Icons.radio_button_unchecked, size: 18),
     );
   }
 }
