@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## 3.0.0
+
+### Breaking
+
+- Logging now goes through `package:logging` instead of `package:logger`, and
+  `ClientConfig.logLevel` and the `LogLevel` enum are gone with it. The client
+  logs under the logger name `KeycloakClient` and prints nothing on its own —
+  the app installs a listener and picks the level. See the Logging section of
+  the README.
+
+  To migrate, drop `logLevel` from your `ClientConfig` and configure
+  `package:logging` at startup:
+
+  ```dart
+  Logger.root.level = Level.INFO;
+  Logger.root.onRecord.listen((r) => debugPrint('${r.level.name}: ${r.message}'));
+  ```
+
+### Bug Fixes
+
+- Logout again revokes the session at Keycloak when the user has no ID token.
+  The `id_token_hint` field was being sent as a literal null instead of being
+  omitted, which made the request body a `Map<String, String?>`; `http` throws
+  when it casts that to form fields, and `revokeSession` swallows the throw. The
+  local session still cleared, so a logout looked successful while the refresh
+  token stayed valid server-side.
+
 ## 2.1.1
 
 ### Bug Fixes

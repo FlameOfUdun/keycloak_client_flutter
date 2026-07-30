@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:logger/logger.dart';
+import 'package:logging/logging.dart';
 import 'package:oauth2/oauth2.dart' as oauth2;
 
 import '../enums/refresh_result.dart';
@@ -10,8 +10,7 @@ import '../models/user_credentials.dart';
 
 /// Signature for the OAuth2 token refresh operation.
 /// Injectable so tests can simulate server responses without HTTP.
-typedef RefreshOperation =
-    Future<oauth2.Client> Function(oauth2.Client current, List<String> scopes);
+typedef RefreshOperation = Future<oauth2.Client> Function(oauth2.Client current, List<String> scopes);
 
 /// Owns all transport concerns: OAuth2 client lifetime, token refresh,
 /// retry scheduling, and recovery detection.
@@ -46,9 +45,7 @@ final class TokenService {
        _scopes = scopes,
        _logger = logger,
        _refreshTimeout = refreshTimeout,
-       _refreshOperation =
-           refreshOperation ??
-           ((client, scopes) => client.refreshCredentials(scopes));
+       _refreshOperation = refreshOperation ?? ((client, scopes) => client.refreshCredentials(scopes));
 
   /// Exposes the active OAuth2 client for direct HTTP calls (userinfo, logout).
   oauth2.Client? get oauthClient => _oauthClient;
@@ -74,17 +71,11 @@ final class TokenService {
     final duration = isRetry
         ? const Duration(seconds: 30)
         : () {
-            final d =
-                credentials.accessTokenExpiry.difference(DateTime.now()) -
-                const Duration(minutes: 1);
+            final d = credentials.accessTokenExpiry.difference(DateTime.now()) - const Duration(minutes: 1);
             return d <= Duration.zero ? const Duration(seconds: 5) : d;
           }();
 
-    _logger.i(
-      isRetry
-          ? 'Retry scheduled in 30s'
-          : 'Token refresh in ${duration.inMinutes}m ${duration.inSeconds % 60}s',
-    );
+    _logger.info(isRetry ? 'Retry scheduled in 30s' : 'Token refresh in ${duration.inMinutes}m ${duration.inSeconds % 60}s');
 
     _refreshTimer = Timer(duration, attemptRefresh);
   }
@@ -110,7 +101,7 @@ final class TokenService {
   }
 
   Future<RefreshResult> _doRefresh() async {
-    _logger.i('Attempting token refresh.');
+    _logger.info('Attempting token refresh.');
 
     try {
       if (_oauthClient == null) {
@@ -118,10 +109,7 @@ final class TokenService {
         return const RefreshPermanentFailure();
       }
 
-      _oauthClient = await _refreshOperation(
-        _oauthClient!,
-        _scopes,
-      ).timeout(_refreshTimeout);
+      _oauthClient = await _refreshOperation(_oauthClient!, _scopes).timeout(_refreshTimeout);
       final credentials = UserCredentials.fromOAuth2(_oauthClient!.credentials);
       await _store.setCredentials(credentials);
 
@@ -131,37 +119,25 @@ final class TokenService {
 
       if (wasFailedBefore) onRecovery();
 
-      _logger.i('Token refresh successful.');
+      _logger.info('Token refresh successful.');
       return RefreshSuccess(credentials);
     } on oauth2.ExpirationException {
-      _logger.w('Session expired, re-authentication required.');
+      _logger.warning('Session expired, re-authentication required.');
       await onPermanentFailure();
       return const RefreshPermanentFailure();
     } on oauth2.AuthorizationException catch (e, st) {
       if (e.error == 'invalid_grant') {
-        _logger.w('Refresh token revoked or expired (invalid_grant).');
+        _logger.warning('Refresh token revoked or expired (invalid_grant).');
         await onPermanentFailure();
         return const RefreshPermanentFailure();
       }
-      _logger.e(
-        'Authorization error during refresh, retrying in 30s.',
-        error: e,
-        stackTrace: st,
-      );
+      _logger.severe('Authorization error during refresh, retrying in 30s.', e, st);
       return await _handleTransientFailure(e);
     } on SocketException catch (e, st) {
-      _logger.w(
-        'Network error during refresh, retrying in 30s.',
-        error: e,
-        stackTrace: st,
-      );
+      _logger.warning('Network error during refresh, retrying in 30s.', e, st);
       return await _handleTransientFailure(e);
     } on TimeoutException catch (e, st) {
-      _logger.w(
-        'Token refresh timed out, retrying in 30s.',
-        error: e,
-        stackTrace: st,
-      );
+      _logger.warning('Token refresh timed out, retrying in 30s.', e, st);
       return await _handleTransientFailure(e);
     }
   }
@@ -170,9 +146,7 @@ final class TokenService {
     _previousRefreshFailed = true;
     final stored = await _store.getCredentials();
     if (stored == null || stored.isRefreshExpired) {
-      _logger.w(
-        'Refresh token locally expired during transient failure — ending session.',
-      );
+      _logger.warning('Refresh token locally expired during transient failure — ending session.');
       await onPermanentFailure();
       return const RefreshPermanentFailure();
     }
@@ -182,22 +156,14 @@ final class TokenService {
 
   /// Sends the Keycloak logout/revocation request to the server.
   /// Errors are swallowed — logout continues locally regardless.
-  Future<void> revokeSession({
-    required Uri logoutEndpoint,
-    required String clientId,
-    required String refreshToken,
-    String? idToken,
-  }) async {
+  Future<void> revokeSession({required Uri logoutEndpoint, required String clientId, required String refreshToken, String? idToken}) async {
     if (_oauthClient == null) return;
     try {
-      await _oauthClient!.post(
-        logoutEndpoint,
-        body: {
-          'client_id': clientId,
-          'refresh_token': refreshToken,
-          'id_token_hint': ?idToken,
-        },
-      );
+      // `?idToken` omits the key when null rather than sending a null value:
+      // a null in the map makes it a Map<String, String?>, which http rejects
+      // when it casts the body to form fields. That throw lands in the catch
+      // below, so a session would silently stop being revoked server-side.
+      await _oauthClient!.post(logoutEndpoint, body: {'client_id': clientId, 'refresh_token': refreshToken, 'id_token_hint': ?idToken});
     } catch (_) {
       // Intentionally swallowed — caller handles fallback
     }

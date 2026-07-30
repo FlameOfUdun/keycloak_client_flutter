@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:logging/logging.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:oauth2/oauth2.dart' as oauth2;
-import 'package:logger/logger.dart';
 import 'package:keycloak_client/src/core/token_service.dart';
 import 'package:keycloak_client/src/enums/refresh_result.dart';
 import 'package:keycloak_client/src/interfaces/auth_credentials_store.dart';
@@ -42,10 +43,11 @@ void main() {
   late MockOAuth2Client oauthClient;
   var permanentCalls = 0;
   var recoveryCalls = 0;
-  final logger = Logger(level: Level.off);
+  final logger = Logger('TokenServiceTest');
 
   setUpAll(() {
     registerFallbackValue(_validCreds());
+    registerFallbackValue(Uri.parse('http://localhost'));
   });
 
   setUp(() {
@@ -342,5 +344,49 @@ void main() {
         service.dispose();
       },
     );
+  });
+
+  group('revokeSession', () {
+    /// Captures the body of the single POST [revokeSession] makes.
+    Future<Map<String, dynamic>?> capturePostBody(String? idToken) async {
+      Map<String, dynamic>? body;
+      when(() => oauthClient.post(any(), body: any(named: 'body'))).thenAnswer((
+        invocation,
+      ) async {
+        body = invocation.namedArguments[#body] as Map<String, dynamic>;
+        return http.Response('', 204);
+      });
+
+      final service = _makeService((_, __) async => oauthClient);
+      service.setClient(oauthClient);
+      await service.revokeSession(
+        logoutEndpoint: Uri.parse('http://localhost/logout'),
+        clientId: 'test-client',
+        refreshToken: 'test-refresh-token',
+        idToken: idToken,
+      );
+      service.dispose();
+      return body;
+    }
+
+    test('omits id_token_hint entirely when there is no ID token', () async {
+      // Carrying the key with a null value makes the body a
+      // Map<String, String?>, which http rejects when it casts to form fields.
+      // revokeSession swallows every throw, so the request never reaches
+      // Keycloak and the refresh token stays valid server-side while the local
+      // session clears — a logout that looks successful and isn't.
+      final body = await capturePostBody(null);
+
+      expect(body, isNotNull, reason: 'no logout request was sent');
+      expect(body!.containsKey('id_token_hint'), isFalse);
+      expect(body, containsPair('client_id', 'test-client'));
+      expect(body, containsPair('refresh_token', 'test-refresh-token'));
+    });
+
+    test('sends id_token_hint when an ID token is present', () async {
+      final body = await capturePostBody('test-id-token');
+
+      expect(body, containsPair('id_token_hint', 'test-id-token'));
+    });
   });
 }

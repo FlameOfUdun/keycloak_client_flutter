@@ -4,14 +4,13 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:logger/logger.dart';
+import 'package:logging/logging.dart';
 import 'package:oauth2/oauth2.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'src/core/session_manager.dart';
 import 'src/core/token_service.dart';
 import 'src/enums/auth_state.dart';
-import 'src/enums/log_level.dart';
 import 'src/enums/refresh_result.dart';
 import 'src/interfaces/auth_credentials_store.dart';
 import 'src/models/client_config.dart';
@@ -25,7 +24,6 @@ import 'src/strategies/platform_login_strategy.dart';
 import 'src/utilities/secure_storage_auth_credentials_store.dart';
 
 export 'src/enums/auth_state.dart';
-export 'src/enums/log_level.dart';
 export 'src/models/client_config.dart';
 export 'src/models/account_credential.dart';
 export 'src/models/keycloak_exception.dart';
@@ -41,7 +39,6 @@ export 'src/interfaces/pending_grant_store.dart';
 final class KeycloakClient {
   late final IAuthCredentialsStore _credentialsStorage;
   late final ILoginStrategy _loginStrategy;
-  late final Logger _logger;
   late final SessionManager _sessionManager;
   late final TokenService _tokenService;
 
@@ -50,6 +47,7 @@ final class KeycloakClient {
   final MobileConfig _mobileConfig;
   final WebConfig _webConfig;
   final RefreshOperation? _tokenRefreshOperation;
+  final _logger = Logger('KeycloakClient');
 
   Completer<void>? _initCompleter;
   bool _initialized = false;
@@ -64,7 +62,6 @@ final class KeycloakClient {
       _credentialsStorage = const SecureStorageAuthCredentialsStore(),
       _tokenRefreshOperation = null,
       _loginStrategy = defaultLoginStrategy {
-    _createLogger(clientConfig.logLevel);
     _createInternals();
   }
 
@@ -90,7 +87,6 @@ final class KeycloakClient {
          mobileOverride: mobileLoginStrategy,
          webOverride: webLoginStrategy,
        ) {
-    _createLogger(clientConfig.logLevel);
     _createInternals();
   }
 
@@ -106,21 +102,6 @@ final class KeycloakClient {
       IWebLoginStrategy() => webOverride ?? strategy,
       _ => throw StateError('Unknown login strategy type: ${strategy.runtimeType}'),
     };
-  }
-
-  void _createLogger(LogLevel logLevel) {
-    _logger = Logger(
-      printer: PrettyPrinter(methodCount: 0, errorMethodCount: 5, lineLength: 80, colors: true),
-      level: switch (logLevel) {
-        LogLevel.trace => Level.trace,
-        LogLevel.debug => Level.debug,
-        LogLevel.info => Level.info,
-        LogLevel.warning => Level.warning,
-        LogLevel.error => Level.error,
-        LogLevel.fatal => Level.fatal,
-        _ => Level.off,
-      },
-    );
   }
 
   void _createInternals() {
@@ -180,7 +161,7 @@ final class KeycloakClient {
       await initialize();
       return true;
     } catch (_) {
-      _logger.e('Initialization failed');
+      _logger.severe('Initialization failed');
       return false;
     }
   }
@@ -196,7 +177,7 @@ final class KeycloakClient {
       return _initCompleter!.future;
     }
 
-    _logger.i('Initializing KeycloakClient');
+    _logger.info('Initializing KeycloakClient');
     _initCompleter = Completer<void>();
 
     Future(() async {
@@ -204,13 +185,13 @@ final class KeycloakClient {
           final user = await _credentialsStorage.getUser();
 
           if (stored == null || user == null) {
-            _logger.i('No stored credentials. User needs to sign in.');
+            _logger.info('No stored credentials. User needs to sign in.');
             _sessionManager.endSession(AuthState.signedOut);
             return;
           }
 
           if (stored.isRefreshExpired) {
-            _logger.i('Refresh token expired. Clearing session.');
+            _logger.info('Refresh token expired. Clearing session.');
             await _endSession(AuthState.sessionExpired);
             return;
           }
@@ -218,7 +199,7 @@ final class KeycloakClient {
           _tokenService.setClient(Client(stored.toOAuth2Credentials(_clientConfig.tokenEndpoint), identifier: _clientConfig.clientId));
 
           if (stored.isAccessExpired) {
-            _logger.i('Access token expired, refreshing on init.');
+            _logger.info('Access token expired, refreshing on init.');
             final result = await _tokenService.attemptRefresh();
             if (result is RefreshPermanentFailure) return;
             // Offline-first: start the session with the cached user profile so the
@@ -237,10 +218,10 @@ final class KeycloakClient {
         .then((_) {
           _initialized = true;
           _initCompleter!.complete();
-          _logger.i('KeycloakClient initialized.');
+          _logger.info('KeycloakClient initialized.');
         })
         .catchError((e, st) {
-          _logger.e('KeycloakClient initialization failed.');
+          _logger.severe('KeycloakClient initialization failed.');
           _initCompleter!.completeError(e, st);
         });
 
@@ -259,7 +240,7 @@ final class KeycloakClient {
   Future<void> login() async {
     await waitForInitialization();
 
-    _logger.i('Initiating login flow via ${_loginStrategy.runtimeType}.');
+    _logger.info('Initiating login flow via ${_loginStrategy.runtimeType}.');
 
     final client = await switch (_loginStrategy) {
       final IDesktopLoginStrategy strategy => strategy.login(platformConfig: _desktopConfig, clientConfig: _clientConfig),
@@ -269,12 +250,12 @@ final class KeycloakClient {
     };
 
     if (client == null) {
-      _logger.w('Login cancelled by user.');
+      _logger.warning('Login cancelled by user.');
       return;
     }
 
     await _finalizeLogin(client);
-    _logger.i('Login successful: ${currentUser?.id ?? 'unknown'}');
+    _logger.info('Login successful: ${currentUser?.id ?? 'unknown'}');
   }
 
   Future<void> _finalizeLogin(Client client) async {
@@ -314,10 +295,7 @@ final class KeycloakClient {
       // Accept header is load-bearing: Keycloak content-negotiates the
       // /account/credentials URL and serves the account-console HTML to any
       // request that doesn't explicitly ask for JSON.
-      final response = await client.get(
-        _clientConfig.accountCredentialsEndpoint,
-        headers: const {'Accept': 'application/json'},
-      );
+      final response = await client.get(_clientConfig.accountCredentialsEndpoint, headers: const {'Accept': 'application/json'});
       if (response.statusCode != 200) {
         throw KeycloakServerException(response.statusCode, 'Credentials request failed');
       }
@@ -327,10 +305,10 @@ final class KeycloakClient {
       }
       return body.whereType<Map<String, dynamic>>().map(AccountCredential.fromJson).toList(growable: false);
     } on KeycloakException catch (e) {
-      _logger.e('Failed to fetch account credentials.', error: e);
+      _logger.severe('Failed to fetch account credentials.', e);
       rethrow;
     } catch (e, s) {
-      _logger.e('Failed to fetch account credentials.', error: e, stackTrace: s);
+      _logger.severe('Failed to fetch account credentials.', e, s);
       throw KeycloakNetworkException(e);
     }
   }
@@ -344,7 +322,7 @@ final class KeycloakClient {
     _assertNotDisposed();
 
     final url = _clientConfig.accountEndpoint;
-    _logger.i('Opening account console: $url');
+    _logger.info('Opening account console: $url');
 
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
       throw const KeycloakNetworkException('Could not open account console.');
@@ -377,14 +355,14 @@ final class KeycloakClient {
     if (client == null) return false;
 
     await _finalizeLogin(client);
-    _logger.i('Web login resumed: ${currentUser?.id ?? 'unknown'}');
+    _logger.info('Web login resumed: ${currentUser?.id ?? 'unknown'}');
     return true;
   }
 
   /// Logs out the current user by clearing local session and notifying the server.
   Future<void> logout() async {
     _assertNotDisposed();
-    _logger.i('Logging out: ${currentUser?.id ?? 'unknown'}');
+    _logger.info('Logging out: ${currentUser?.id ?? 'unknown'}');
 
     final stored = await _credentialsStorage.getCredentials();
     if (stored != null) {
@@ -397,7 +375,7 @@ final class KeycloakClient {
     }
 
     await _endSession(AuthState.signedOut);
-    _logger.i('User logged out.');
+    _logger.info('User logged out.');
   }
 
   Future<void> _endSession(AuthState reason) async {
@@ -434,12 +412,12 @@ final class KeycloakClient {
   }
 
   Future<UserInfo?> _reloadUser() async {
-    _logger.i('Reloading user data.');
+    _logger.info('Reloading user data.');
 
     try {
       final token = await getAuthToken();
       if (token == null) {
-        _logger.w('No access token available to reload user.');
+        _logger.warning('No access token available to reload user.');
         return null;
       }
       final client = _tokenService.oauthClient;
@@ -451,13 +429,13 @@ final class KeycloakClient {
       final user = UserInfo.fromApi(jsonDecode(response.body) as Map<String, dynamic>);
       await _credentialsStorage.setUser(user);
       _sessionManager.updateUser(user);
-      _logger.i('User data reloaded: ${user.id}');
+      _logger.info('User data reloaded: ${user.id}');
       return user;
     } on KeycloakNetworkException {
-      _logger.w('Cannot reload user — network unavailable.');
+      _logger.warning('Cannot reload user — network unavailable.');
       return null;
     } catch (e, st) {
-      _logger.e('Reloading user failed.', error: e, stackTrace: st);
+      _logger.severe('Reloading user failed.', e, st);
       rethrow;
     }
   }
@@ -486,7 +464,7 @@ final class KeycloakClient {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
-    _logger.i('Disposing KeycloakClient.');
+    _logger.info('Disposing KeycloakClient.');
     _sessionManager.dispose();
     _tokenService.dispose();
   }

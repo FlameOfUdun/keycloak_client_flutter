@@ -104,7 +104,6 @@ final client = KeycloakClient(
 - `clientId`: OAuth client ID
 - `clientSecret`: for confidential clients only
 - `scopes`: defaults to `openid`, `email`, `profile`
-- `logLevel`: package logging verbosity
 - `refreshTimeout`: HTTP timeout for each token refresh attempt — defaults to `Duration(seconds: 15)`. Lower for faster offline detection; raise for high-latency deployments.
 
 Platform config defaults:
@@ -210,6 +209,27 @@ StreamBuilder<UserInfo?>(
     return Text(user?.username ?? 'No user');
   },
 );
+```
+
+## Logging
+
+The client logs through `package:logging` under the logger name
+`KeycloakClient`. Nothing is printed unless your app installs a listener, so
+verbosity is yours to set — there is no package-level log option:
+
+```dart
+Logger.root.level = Level.INFO;
+Logger.root.onRecord.listen((r) => debugPrint('${r.level.name}: ${r.message}'));
+```
+
+To keep the rest of your app quiet, listen on the package's logger alone and
+set `hierarchicalLoggingEnabled = true` first:
+
+```dart
+hierarchicalLoggingEnabled = true;
+Logger('KeycloakClient')
+  ..level = Level.INFO
+  ..onRecord.listen((r) => debugPrint('${r.level.name}: ${r.message}'));
 ```
 
 ## Platform Setup
