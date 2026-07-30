@@ -38,26 +38,6 @@ final class UserCredentials {
 
   // ─── Factories ─────────────────────────────────────────────────────────────
 
-  /// Creates a [UserCredentials] from a raw Keycloak token endpoint response.
-  factory UserCredentials.fromApi(Map<String, dynamic> json) {
-    final refreshExpiresIn = json['refresh_expires_in'] as int;
-    final isOffline = refreshExpiresIn == 0;
-    return UserCredentials(
-      accessToken: json['access_token'] as String,
-      refreshToken: json['refresh_token'] as String,
-      accessTokenExpiry: DateTime.now().add(
-        Duration(seconds: json['expires_in'] as int),
-      ),
-      // refresh_expires_in == 0 → offline token with no local expiry; use far-future
-      // sentinel so local checks never fire — actual expiry is enforced via 401.
-      refreshTokenExpiry: isOffline
-          ? DateTime(9999)
-          : DateTime.now().add(Duration(seconds: refreshExpiresIn)),
-      idToken: json['id_token'] as String?,
-      isOfflineToken: isOffline,
-    );
-  }
-
   /// Creates a [UserCredentials] from a locally stored JSON map.
   factory UserCredentials.fromJson(Map<String, dynamic> json) {
     return UserCredentials(
@@ -72,9 +52,16 @@ final class UserCredentials {
 
   /// Creates a [UserCredentials] from an [oauth2.Credentials] object.
   ///
-  /// The `oauth2` package does not carry a `refresh_expires_in` field, so
-  /// [refreshTokenExpiry] defaults to 30 days (Keycloak's typical default).
-  /// Set [isOfflineToken] to `true` if you requested the `offline_access` scope.
+  /// `package:oauth2` discards the token response's `refresh_expires_in`, so
+  /// neither the real refresh lifetime nor the `refresh_expires_in == 0` marker
+  /// that identifies an offline token survives the exchange. Both therefore
+  /// have to be told to this factory rather than read from [credentials]:
+  /// [isOfflineToken] from whether `offline_access` was requested, and
+  /// [refreshTokenLifetime] from the realm's SSO Session Max.
+  ///
+  /// Getting [isOfflineToken] wrong is not cosmetic. An offline session stored
+  /// as a normal one gets a real [refreshTokenExpiry], and once that passes,
+  /// `initialize()` ends a session Keycloak would still have honoured.
   factory UserCredentials.fromOAuth2(
     oauth2.Credentials credentials, {
     bool isOfflineToken = false,

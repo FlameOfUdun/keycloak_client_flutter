@@ -1,14 +1,50 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:keycloak_client/keycloak_client.dart';
 
+// Supplied with --dart-define so this file can be run against a real server
+// without editing it:
+//
+//   flutter run -d windows \
+//     --dart-define=KC_BASE_URL=http://localhost:8080 \
+//     --dart-define=KC_REALM=winche-test \
+//     --dart-define=KC_CLIENT_ID=flutter-app \
+//     --dart-define=KC_DESKTOP_REDIRECT=http://localhost:8765/callback
+const _baseUrl = String.fromEnvironment(
+  'KC_BASE_URL',
+  defaultValue: 'your-keycloak-server',
+);
+const _realm = String.fromEnvironment('KC_REALM', defaultValue: 'your-realm');
+const _clientId = String.fromEnvironment(
+  'KC_CLIENT_ID',
+  defaultValue: 'your-client-id',
+);
+
+/// Where Keycloak sends the browser back to.
+///
+/// Desktop defaults to a hosted page that bounces to the loopback listener,
+/// because Keycloak rejects some loopback redirect URIs. Point it straight at
+/// the loopback when your realm allows it, as the local test realm does.
+const _desktopRedirect = String.fromEnvironment(
+  'KC_DESKTOP_REDIRECT',
+  defaultValue: 'https://winchetechnologies.co.uk/tools/oauth_redirect',
+);
+const _webRedirect = String.fromEnvironment(
+  'KC_WEB_REDIRECT',
+  defaultValue: 'https://winchetechnologies.co.uk/tools/oauth_redirect',
+);
+
 final client = KeycloakClient(
   clientConfig: ClientConfig(
-    baseUrl: 'your-keycloak-server',
-    realm: 'your-realm',
-    clientId: 'your-client-id',
+    baseUrl: _baseUrl,
+    realm: _realm,
+    clientId: _clientId,
     refreshTimeout: const Duration(seconds: 3),
   ),
+  desktopConfig: const DesktopConfig(redirectUri: _desktopRedirect),
+  webConfig: const WebConfig(redirectUri: _webRedirect),
 );
 
 void main() async {
@@ -183,6 +219,7 @@ final class _HomeScreen extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _UserInfoCard(client: client),
+                _TokenRotationCard(client: client),
                 _CredentialsCard(client: client),
                 const SizedBox(height: 24),
               ],
@@ -254,6 +291,76 @@ final class _UserInfoCard extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Watches [KeycloakClient.onTokenRefreshed].
+///
+/// A connection authenticated once at dial time would use this to re-dial
+/// before the token it holds expires; here it just counts, so a refresh is
+/// visible without waiting for something to break.
+final class _TokenRotationCard extends StatefulWidget {
+  final KeycloakClient client;
+  const _TokenRotationCard({required this.client});
+
+  @override
+  State<_TokenRotationCard> createState() => _TokenRotationCardState();
+}
+
+final class _TokenRotationCardState extends State<_TokenRotationCard> {
+  StreamSubscription<void>? _sub;
+  int _rotations = 0;
+  DateTime? _lastAt;
+  String? _tokenTail;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = widget.client.onTokenRefreshed.listen((_) async {
+      final token = await widget.client.getAuthToken();
+      if (!mounted) return;
+      setState(() {
+        _rotations++;
+        _lastAt = DateTime.now();
+        _tokenTail = token == null
+            ? null
+            : '…${token.substring(token.length - 8)}';
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 24),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: 4,
+          children: [
+            Text(
+              'Token rotation',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            _InfoRow(label: 'Refreshes seen', value: '$_rotations'),
+            _InfoRow(
+              label: 'Last at',
+              value: _lastAt == null
+                  ? 'not yet'
+                  : TimeOfDay.fromDateTime(_lastAt!).format(context),
+            ),
+            _InfoRow(label: 'Access token', value: _tokenTail ?? '—'),
+          ],
+        ),
+      ),
     );
   }
 }

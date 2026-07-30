@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:oauth2/oauth2.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,6 +9,7 @@ import '../models/client_config.dart';
 import '../models/keycloak_exception.dart';
 import '../models/platform_config.dart';
 import '../interfaces/login_strategy.dart';
+import '../utilities/pkce.dart';
 
 /// Desktop login via localhost HttpServer + system browser.
 /// Works on Windows, macOS, and Linux.
@@ -54,12 +54,25 @@ final class DesktopLoginStrategy implements IDesktopLoginStrategy {
     final authUrl = grant.getAuthorizationUrl(
       redirect,
       scopes: clientConfig.scopes,
+      state: generateState(),
     );
 
     // Bind the loopback server BEFORE launching the browser so the IdP's
     // redirect cannot arrive before we are listening (e.g. when the user
     // is already signed in at Keycloak and the round-trip is instant).
-    final server = await HttpServer.bind(host, port);
+    //
+    // The loopback port is open to anything running on this machine, so the
+    // `state` above is what makes a code arriving here trustworthy: oauth2
+    // rejects the exchange when it does not match.
+    final HttpServer server;
+    try {
+      server = await HttpServer.bind(host, port);
+    } on SocketException catch (e) {
+      throw KeycloakNetworkException(
+        'Could not bind the login listener on $host:$port — '
+        'another process may already hold it. ($e)',
+      );
+    }
 
     if (!await launchUrl(authUrl, mode: LaunchMode.externalApplication)) {
       await server.close();
@@ -105,19 +118,21 @@ final class DesktopLoginStrategy implements IDesktopLoginStrategy {
 
     final params = callbackRequest.uri.queryParameters;
 
-    if (params.containsKey('error')) return null; // user cancelled
+    final error = params['error'];
+    if (error != null) {
+      if (error == 'access_denied') return null; // user cancelled
+      throw KeycloakServerException(400, error);
+    }
 
     try {
       return await grant.handleAuthorizationResponse(params);
     } on AuthorizationException catch (e) {
       throw KeycloakServerException(400, e.error);
+    } on FormatException catch (e) {
+      // Raised by oauth2 when the callback's `state` does not match the one
+      // sent — a code posted to the loopback port by something other than the
+      // browser we launched.
+      throw KeycloakServerException(400, e.message);
     }
-  }
-
-  String generateCodeVerifier() {
-    const chars =
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-    final rng = Random.secure();
-    return List.generate(64, (_) => chars[rng.nextInt(chars.length)]).join();
   }
 }

@@ -7,6 +7,12 @@ import '../models/platform_config.dart';
 abstract interface class ILoginStrategy<TConfig extends PlatformConfig> {
   /// Performs the full Authorization Code + PKCE flow and returns
   /// a fully authorised [Client], or `null` if the user cancelled.
+  ///
+  /// "Cancelled" means the IdP returned `access_denied` — the user declined at
+  /// the consent screen. Every other `error` code is a failure and throws
+  /// `KeycloakServerException`, because silently reporting a misconfigured
+  /// client or an invalid scope as a cancellation leaves the caller with
+  /// nothing to show and nothing to log.
   Future<Client?> login({
     required TConfig platformConfig,
     required ClientConfig clientConfig,
@@ -25,9 +31,16 @@ abstract interface class IWebLoginStrategy
   /// [callbackUri]. Returns the authorised [Client] when a pending grant
   /// for the callback's `state` was found, validated, and exchanged.
   /// Returns `null` when there is no matching pending grant (so callers
-  /// can invoke this unconditionally on app startup).
+  /// can invoke this unconditionally on app startup), and also when the user
+  /// declined at the consent screen.
   ///
-  /// Throws `KeycloakTimeoutException` when a matching pending grant
-  /// exists but has exceeded the store's TTL.
-  Future<Client?> handleCallback(Uri callbackUri);
+  /// [clientSecret] comes from the live [ClientConfig] rather than the
+  /// persisted grant: the grant sits in browser storage, where a secret would
+  /// be readable by any script on the origin. Normally null — a browser client
+  /// should be a public one.
+  ///
+  /// Throws `KeycloakTimeoutException` when a matching pending grant exists but
+  /// has exceeded its TTL, and `KeycloakServerException` when the IdP reported
+  /// an error other than `access_denied`.
+  Future<Client?> handleCallback(Uri callbackUri, {String? clientSecret});
 }

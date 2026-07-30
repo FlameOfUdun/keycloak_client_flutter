@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:logging/logging.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:oauth2/oauth2.dart' as oauth2;
-import 'package:logger/logger.dart';
 import 'package:keycloak_client/src/core/token_service.dart';
 import 'package:keycloak_client/src/enums/refresh_result.dart';
 import 'package:keycloak_client/src/interfaces/auth_credentials_store.dart';
@@ -42,10 +43,12 @@ void main() {
   late MockOAuth2Client oauthClient;
   var permanentCalls = 0;
   var recoveryCalls = 0;
-  final logger = Logger(level: Level.off);
+  var refreshedCalls = 0;
+  final logger = Logger('TokenServiceTest');
 
   setUpAll(() {
     registerFallbackValue(_validCreds());
+    registerFallbackValue(Uri.parse('http://localhost'));
   });
 
   setUp(() {
@@ -53,17 +56,23 @@ void main() {
     oauthClient = MockOAuth2Client();
     permanentCalls = 0;
     recoveryCalls = 0;
+    refreshedCalls = 0;
   });
 
   TokenService _makeService(
     Future<oauth2.Client> Function(oauth2.Client, List<String>) refreshOp, {
     Duration refreshTimeout = const Duration(seconds: 15),
+    Duration refreshTokenLifetime = const Duration(days: 30),
+    bool isOfflineSession = false,
   }) {
     return TokenService(
       store: store,
       scopes: const ['openid'],
+      refreshTokenLifetime: refreshTokenLifetime,
+      isOfflineSession: isOfflineSession,
       onPermanentFailure: () async => permanentCalls++,
       onRecovery: () => recoveryCalls++,
+      onTokenRefreshed: () => refreshedCalls++,
       logger: logger,
       refreshOperation: refreshOp,
       refreshTimeout: refreshTimeout,
@@ -342,5 +351,150 @@ void main() {
         service.dispose();
       },
     );
+  });
+
+  group('refresh preserves session shape', () {
+    /// Runs one successful refresh and returns what was written to the store.
+    Future<UserCredentials> refreshAndCapture({
+      required bool isOfflineSession,
+      Duration refreshTokenLifetime = const Duration(days: 30),
+    }) async {
+      late UserCredentials written;
+      when(() => oauthClient.credentials).thenReturn(_oauth2Creds(_validCreds()));
+      when(() => store.setCredentials(any())).thenAnswer((invocation) async {
+        written = invocation.positionalArguments.first as UserCredentials;
+      });
+
+      final service = _makeService(
+        (_, __) async => oauthClient,
+        isOfflineSession: isOfflineSession,
+        refreshTokenLifetime: refreshTokenLifetime,
+      );
+      service.setClient(oauthClient);
+      await service.attemptRefresh();
+      service.dispose();
+      return written;
+    }
+
+    test('an offline session stays offline across a refresh', () async {
+      // oauth2.Credentials carries neither `refresh_expires_in` nor any offline
+      // marker, so a refresh that does not re-supply them downgrades an offline
+      // session to a dated one. The user is then signed out by initialize()
+      // once that invented expiry passes — against a refresh token Keycloak
+      // would still have accepted.
+      final written = await refreshAndCapture(isOfflineSession: true);
+
+      expect(written.isOfflineToken, isTrue);
+      expect(written.isRefreshExpired, isFalse);
+      expect(written.refreshTokenExpiry.year, 9999);
+    });
+
+    test('a normal session keeps a real expiry', () async {
+      final written = await refreshAndCapture(isOfflineSession: false);
+
+      expect(written.isOfflineToken, isFalse);
+      expect(written.refreshTokenExpiry.year, isNot(9999));
+    });
+
+    test('refreshTokenLifetime sets how far the expiry is pushed', () async {
+      final written = await refreshAndCapture(
+        isOfflineSession: false,
+        refreshTokenLifetime: const Duration(minutes: 30),
+      );
+
+      final remaining = written.refreshTokenExpiry.difference(DateTime.now());
+      expect(remaining, lessThanOrEqualTo(const Duration(minutes: 30)));
+      expect(remaining, greaterThan(const Duration(minutes: 29)));
+    });
+  });
+
+  group('onTokenRefreshed', () {
+    test('fires once on a successful refresh', () async {
+      when(() => oauthClient.credentials).thenReturn(_oauth2Creds(_validCreds()));
+      when(() => store.setCredentials(any())).thenAnswer((_) async {});
+
+      final service = _makeService((_, __) async => oauthClient);
+      service.setClient(oauthClient);
+
+      await service.attemptRefresh();
+
+      expect(refreshedCalls, 1);
+      service.dispose();
+    });
+
+    test('stays silent on a transient failure', () async {
+      // The token did not change, so a consumer holding one has no reason to
+      // re-dial — and the retry is already scheduled.
+      when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
+
+      final service = _makeService(
+        (_, __) async => throw const SocketException('offline'),
+      );
+      service.setClient(oauthClient);
+
+      final result = await service.attemptRefresh();
+
+      expect(result, isA<RefreshTransientFailure>());
+      expect(refreshedCalls, 0);
+      service.dispose();
+    });
+
+    test('stays silent on a permanent failure', () async {
+      final service = _makeService(
+        (_, __) async =>
+            throw oauth2.AuthorizationException('invalid_grant', null, null),
+      );
+      service.setClient(oauthClient);
+
+      final result = await service.attemptRefresh();
+
+      expect(result, isA<RefreshPermanentFailure>());
+      expect(refreshedCalls, 0);
+      service.dispose();
+    });
+  });
+
+  group('revokeSession', () {
+    /// Captures the body of the single POST [revokeSession] makes.
+    Future<Map<String, dynamic>?> capturePostBody(String? idToken) async {
+      Map<String, dynamic>? body;
+      when(() => oauthClient.post(any(), body: any(named: 'body'))).thenAnswer((
+        invocation,
+      ) async {
+        body = invocation.namedArguments[#body] as Map<String, dynamic>;
+        return http.Response('', 204);
+      });
+
+      final service = _makeService((_, __) async => oauthClient);
+      service.setClient(oauthClient);
+      await service.revokeSession(
+        logoutEndpoint: Uri.parse('http://localhost/logout'),
+        clientId: 'test-client',
+        refreshToken: 'test-refresh-token',
+        idToken: idToken,
+      );
+      service.dispose();
+      return body;
+    }
+
+    test('omits id_token_hint entirely when there is no ID token', () async {
+      // Carrying the key with a null value makes the body a
+      // Map<String, String?>, which http rejects when it casts to form fields.
+      // revokeSession swallows every throw, so the request never reaches
+      // Keycloak and the refresh token stays valid server-side while the local
+      // session clears — a logout that looks successful and isn't.
+      final body = await capturePostBody(null);
+
+      expect(body, isNotNull, reason: 'no logout request was sent');
+      expect(body!.containsKey('id_token_hint'), isFalse);
+      expect(body, containsPair('client_id', 'test-client'));
+      expect(body, containsPair('refresh_token', 'test-refresh-token'));
+    });
+
+    test('sends id_token_hint when an ID token is present', () async {
+      final body = await capturePostBody('test-id-token');
+
+      expect(body, containsPair('id_token_hint', 'test-id-token'));
+    });
   });
 }

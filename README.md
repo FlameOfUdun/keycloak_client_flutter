@@ -103,8 +103,8 @@ final client = KeycloakClient(
 - `realm`: Keycloak realm name
 - `clientId`: OAuth client ID
 - `clientSecret`: for confidential clients only
-- `scopes`: defaults to `openid`, `email`, `profile`
-- `logLevel`: package logging verbosity
+- `scopes`: defaults to `openid`, `email`, `profile`. Include `offline_access` for a long-lived session — the client detects it here and stores the refresh token with no local expiry
+- `refreshTokenLifetime`: how long a refresh token is assumed to last — defaults to 30 days. `package:oauth2` drops the server's `refresh_expires_in`, so this is assumed rather than read; set it to match your realm's **SSO Session Max**. Ignored for `offline_access` sessions
 - `refreshTimeout`: HTTP timeout for each token refresh attempt — defaults to `Duration(seconds: 15)`. Lower for faster offline detection; raise for high-latency deployments.
 
 Platform config defaults:
@@ -210,6 +210,40 @@ StreamBuilder<UserInfo?>(
     return Text(user?.username ?? 'No user');
   },
 );
+```
+
+Token rotation — for connections authenticated once at dial time:
+
+```dart
+client.onTokenRefreshed.listen((_) async {
+  final token = await client.getAuthToken();
+  socket.redial(token); // the old token is about to expire
+});
+```
+
+Unlike the two streams above, this one does not replay on listen: a rotation is
+an event, not a state. It stays silent while signed out, including during the
+refresh `initialize()` performs on a cold start with an expired access token.
+
+## Logging
+
+The client logs through `package:logging` under the logger name
+`KeycloakClient`. Nothing is printed unless your app installs a listener, so
+verbosity is yours to set — there is no package-level log option:
+
+```dart
+Logger.root.level = Level.INFO;
+Logger.root.onRecord.listen((r) => debugPrint('${r.level.name}: ${r.message}'));
+```
+
+To keep the rest of your app quiet, listen on the package's logger alone and
+set `hierarchicalLoggingEnabled = true` first:
+
+```dart
+hierarchicalLoggingEnabled = true;
+Logger('KeycloakClient')
+  ..level = Level.INFO
+  ..onRecord.listen((r) => debugPrint('${r.level.name}: ${r.message}'));
 ```
 
 ## Platform Setup
@@ -322,12 +356,13 @@ Always:
 - `handleWebCallback(uri)`: resume a web redirect flow
 - `logout()`: clear session and notify Keycloak when possible
 - `getAuthToken()`: return a valid access token, `null` if no session, or throw `KeycloakNetworkException` if offline with a valid session
-- `refreshToken()`: force an immediate token refresh and user profile reload regardless of token expiry — useful after account management or role changes; throws `KeycloakNetworkException` if offline
+- `refreshToken()`: force an immediate token refresh and user profile reload regardless of token expiry — useful after account management or role changes; throws `KeycloakNetworkException` if offline, or `KeycloakSessionExpiredException` if the session is dead
 - `reloadUser()`: reload profile data from `/userinfo`
 - `getAccountCredentials()`: list the user's configured authentication methods as a sealed `AccountCredential` family
 - `manageAccount()`: open Keycloak account console in external browser
 - `onAuthChange`: stream of `AuthState`
 - `onUserChange`: stream of `UserInfo?`
+- `onTokenRefreshed`: fires after every successful refresh while signed in; does not replay on listen
 
 ## Auth States
 
@@ -340,10 +375,13 @@ Always:
 
 The package throws typed exceptions:
 
-- `KeycloakNetworkException`
-- `KeycloakServerException`
-- `KeycloakSessionExpiredException`
-- `KeycloakTimeoutException`
+- `KeycloakNetworkException` — the server could not be reached, or a browser/listener could not be started. Retryable
+- `KeycloakServerException` — a non-2xx response, or an IdP `error` in the login callback other than `access_denied`
+- `KeycloakSessionExpiredException` — thrown by `refreshToken()` when the session is permanently dead and the user must sign in again
+- `KeycloakTimeoutException` — the user never came back from the browser, or a web grant aged past `pendingGrantTTL`
+
+A cancelled login is not an exception: `login()` and `handleWebCallback()`
+return normally when the IdP reports `access_denied`.
 
 ## Notes
 

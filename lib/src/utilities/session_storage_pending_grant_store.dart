@@ -9,12 +9,12 @@ const _kPendingGrantPrefix = 'keycloak_client.pending.';
 ///
 /// SessionStorage survives the full-page OAuth redirect and dies with the
 /// tab — exactly the lifetime we want for a CSRF-sensitive PKCE record.
+///
+/// Expiry is read from each record's own `ttlMs`, not from a store-wide
+/// setting, so the TTL the caller configured on `WebConfig` is the one that
+/// applies.
 final class SessionStoragePendingGrantStore implements IPendingGrantStore {
-  final Duration ttl;
-
-  const SessionStoragePendingGrantStore({
-    this.ttl = const Duration(minutes: 10),
-  });
+  const SessionStoragePendingGrantStore();
 
   @override
   void put(PendingGrant grant) {
@@ -31,9 +31,8 @@ final class SessionStoragePendingGrantStore implements IPendingGrantStore {
     if (raw == null) return null;
     window.sessionStorage.removeItem(key);
     try {
-      final g = PendingGrant.fromJsonString(raw);
-      if (g.isExpired(ttl)) return null;
-      return g;
+      final grant = PendingGrant.fromJsonString(raw);
+      return grant.isExpired ? null : grant;
     } catch (_) {
       return null;
     }
@@ -44,7 +43,7 @@ final class SessionStoragePendingGrantStore implements IPendingGrantStore {
     final raw = window.sessionStorage.getItem('$_kPendingGrantPrefix$state');
     if (raw == null) return false;
     try {
-      return PendingGrant.fromJsonString(raw).isExpired(ttl);
+      return PendingGrant.fromJsonString(raw).isExpired;
     } catch (_) {
       return false;
     }
@@ -60,9 +59,7 @@ final class SessionStoragePendingGrantStore implements IPendingGrantStore {
       final raw = storage.getItem(key);
       if (raw == null) continue;
       try {
-        if (PendingGrant.fromJsonString(raw).isExpired(ttl)) {
-          keysToRemove.add(key);
-        }
+        if (PendingGrant.fromJsonString(raw).isExpired) keysToRemove.add(key);
       } catch (_) {
         keysToRemove.add(key);
       }
