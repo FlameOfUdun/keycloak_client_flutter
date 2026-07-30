@@ -28,6 +28,15 @@
 
 ### Bug Fixes
 
+- **A second `login()` while one is running no longer fails.** It now joins the
+  attempt already in flight instead of starting another. On desktop a second
+  attempt could not work at all: the first one's loopback listener holds its
+  port until the user finishes or `DesktopConfig.loopbackTimeout` expires — five
+  minutes by default — so binding it again threw, and an impatient double-tap
+  killed a login that was otherwise working. Since the user cannot tell a slow
+  browser from a dropped one, show something while the call is outstanding; the
+  example disables its button and says it is waiting for the browser.
+
 - **Offline tokens no longer degrade into 30-day ones.** `isOfflineToken` was
   never set anywhere: both credential-writing paths called
   `UserCredentials.fromOAuth2` without it, so a session opened with

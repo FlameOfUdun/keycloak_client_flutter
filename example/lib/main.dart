@@ -126,6 +126,68 @@ final class _LoadingScreen extends StatelessWidget {
   }
 }
 
+/// A sign-in button that reports what it is doing.
+///
+/// Login takes the user out to a browser and back, which can take a while and
+/// gives the app no progress to show. Without feedback the window just sits
+/// there looking idle, so people tap again — and a failure surfaces as an
+/// unhandled exception rather than something readable.
+final class _SignInButton extends StatefulWidget {
+  final KeycloakClient client;
+  final String label;
+  const _SignInButton({required this.client, required this.label});
+
+  @override
+  State<_SignInButton> createState() => _SignInButtonState();
+}
+
+final class _SignInButtonState extends State<_SignInButton> {
+  bool _busy = false;
+
+  Future<void> _signIn() async {
+    setState(() => _busy = true);
+    try {
+      await widget.client.login();
+    } on Exception catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Sign-in failed: $e'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      spacing: 12,
+      children: [
+        FilledButton.icon(
+          onPressed: _busy ? null : _signIn,
+          icon: _busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.login),
+          label: Text(widget.label),
+        ),
+        if (_busy)
+          Text(
+            'Waiting for you to finish in the browser…',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+      ],
+    );
+  }
+}
+
 final class _LoginScreen extends StatelessWidget {
   final KeycloakClient client;
   const _LoginScreen({required this.client});
@@ -143,11 +205,7 @@ final class _LoginScreen extends StatelessWidget {
               'Sign in to continue',
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            FilledButton.icon(
-              onPressed: client.login,
-              icon: const Icon(Icons.login),
-              label: const Text('Sign in with Keycloak'),
-            ),
+            _SignInButton(client: client, label: 'Sign in with Keycloak'),
           ],
         ),
       ),
@@ -177,11 +235,7 @@ final class _SessionExpiredScreen extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const Text('Please sign in again to continue.'),
-            FilledButton.icon(
-              onPressed: client.login,
-              icon: const Icon(Icons.login),
-              label: const Text('Sign in again'),
-            ),
+            _SignInButton(client: client, label: 'Sign in again'),
           ],
         ),
       ),

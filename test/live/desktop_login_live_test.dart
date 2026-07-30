@@ -7,8 +7,9 @@
 // and round-trips — a mocked token endpoint would accept anything.
 //
 // Needs the same realm as keycloak_live_test.dart, plus
-// `http://localhost:8765/callback` in the client's redirect URIs. Skips when
-// nothing is listening on 8080.
+// `http://localhost:8765/callback` in the client's redirect URIs and a second
+// user `tester-desktop` / `password123`. Skips when nothing is listening on
+// 8080.
 //
 // ignore_for_file: avoid_print — progress output is the point of this file.
 import 'dart:io';
@@ -26,6 +27,13 @@ const _baseUrl = 'http://localhost:8080';
 const _realm = 'winche-test';
 const _clientId = 'flutter-app';
 const _loopback = 'http://localhost:8765/callback';
+
+/// A user of its own, not the one keycloak_live_test.dart uses.
+///
+/// Test files run concurrently, and that file logs sessions out. Sharing an
+/// identity let it kill a session this one was in the middle of using, which
+/// showed up as either suite failing at random.
+const _username = 'tester-desktop';
 
 /// Stands in for the system browser: records the URL instead of opening it.
 final class FakeUrlLauncher extends Mock
@@ -78,7 +86,7 @@ Future<void> completeLoginInBrowser(String authUrl) async {
         'Content-Type': 'application/x-www-form-urlencoded',
         if (cookies != null) 'Cookie': _cookieHeader(cookies),
       },
-      body: {'username': 'tester', 'password': 'password123'},
+      body: {'username': _username, 'password': 'password123'},
     );
 
     if (submit.statusCode != 302) {
@@ -182,28 +190,29 @@ void main() {
       ),
     );
 
+    // Turn a rejection into a value straight away. Nothing awaits `login`
+    // until the end of this test, and it rejects the moment the bad callback
+    // lands — an unawaited rejection is reported as an uncaught error and
+    // fails the test even though the outcome is exactly what we want.
+    final outcome = login.then<Object?>((v) => v, onError: (Object e) => e);
+
     await Future.delayed(const Duration(milliseconds: 300));
 
     // An attacker cannot know the state, so this is what their callback looks
-    // like: a plausible code and a wrong (here, absent-but-guessed) state.
+    // like: a plausible code and a wrong (here, guessed) state.
     await http
         .get(Uri.parse('$_loopback?code=injected-code&state=wrong-state'))
         .catchError((_) => http.Response('', 500));
 
-    // Asserting on the *reason*, not just that it threw. Without a state to
+    // Asserting on the *reason*, not just that it failed. Without a state to
     // compare, the injected code is sent to Keycloak and rejected there — so
     // the flow fails either way, and only the message distinguishes "refused
     // locally, nothing exchanged" from "asked the server about an attacker's
     // code".
-    await expectLater(
-      login,
-      throwsA(
-        isA<Exception>().having(
-          (e) => e.toString(),
-          'message',
-          contains('state'),
-        ),
-      ),
+    expect(
+      await outcome,
+      isA<Exception>()
+          .having((e) => e.toString(), 'message', contains('state')),
     );
     print('  [ok] a mismatched state is refused before any exchange');
   }, timeout: const Timeout(Duration(minutes: 2)));

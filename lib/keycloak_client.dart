@@ -55,6 +55,7 @@ final class KeycloakClient {
   final _tokenRefreshed = StreamController<void>.broadcast();
 
   Completer<void>? _initCompleter;
+  Future<void>? _loginInFlight;
   bool _initialized = false;
   bool _disposed = false;
 
@@ -270,7 +271,33 @@ final class KeycloakClient {
   ///            on the next page load to finalise the session.
   ///
   /// Returns normally (without throwing) if the user cancels.
-  Future<void> login() async {
+  ///
+  /// Calling this while a login is already running joins that attempt instead
+  /// of starting a second one, so an impatient double-tap is a no-op rather
+  /// than a failure. A second attempt is not merely wasteful: on desktop it
+  /// cannot work at all, because the first one's loopback listener holds its
+  /// port until the user finishes or [DesktopConfig.loopbackTimeout] expires —
+  /// five minutes by default — and binding it again throws.
+  ///
+  /// The user has no way to tell a slow browser from a dropped one, so show
+  /// something while this is in flight; the example disables its button and
+  /// says it is waiting for the browser.
+  ///
+  /// On web the returned future never completes by design (the tab is
+  /// unloading), so the guard stays latched for the page's remaining lifetime.
+  Future<void> login() {
+    _assertNotDisposed();
+    final inFlight = _loginInFlight;
+    if (inFlight != null) {
+      _logger.info('Login already in progress; joining it.');
+      return inFlight;
+    }
+    final attempt = _login().whenComplete(() => _loginInFlight = null);
+    _loginInFlight = attempt;
+    return attempt;
+  }
+
+  Future<void> _login() async {
     await waitForInitialization();
 
     _logger.info('Initiating login flow via ${_loginStrategy.runtimeType}.');

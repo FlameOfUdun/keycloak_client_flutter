@@ -38,6 +38,45 @@ final class FakeStore implements IAuthCredentialsStore {
   }
 }
 
+/// Shared state for the two strategy fakes below.
+///
+/// A login that stays in flight until released, standing in for the window
+/// where a real desktop strategy is holding the loopback port open.
+final class LoginProbe {
+  var calls = 0;
+  var completer = Completer<oauth2.Client?>();
+
+  Future<oauth2.Client?> record() {
+    calls++;
+    return completer.future;
+  }
+}
+
+// Both are supplied because which one is used depends on defaultTargetPlatform,
+// and flutter_test pins that to android — so a desktop-only fake is silently
+// ignored and the real mobile strategy runs instead.
+final class SlowDesktopStrategy implements IDesktopLoginStrategy {
+  final LoginProbe probe;
+  SlowDesktopStrategy(this.probe);
+
+  @override
+  Future<oauth2.Client?> login({
+    required DesktopConfig platformConfig,
+    required ClientConfig clientConfig,
+  }) => probe.record();
+}
+
+final class SlowMobileStrategy implements IMobileLoginStrategy {
+  final LoginProbe probe;
+  SlowMobileStrategy(this.probe);
+
+  @override
+  Future<oauth2.Client?> login({
+    required MobileConfig platformConfig,
+    required ClientConfig clientConfig,
+  }) => probe.record();
+}
+
 UserCredentials _creds({required bool accessExpired}) => UserCredentials(
   accessToken: accessExpired ? 'stale-access' : 'fresh-access',
   refreshToken: 'valid-refresh',
@@ -121,6 +160,69 @@ void main() {
             'Double-timeout bug: refreshOperation called more than once during initialize()',
       );
 
+      client.dispose();
+    });
+  });
+
+  group('login()', () {
+    test('a second call joins the first instead of starting another', () async {
+      // A double-tap used to start a second flow. On desktop that cannot work:
+      // the first attempt's loopback listener holds its port for the whole
+      // loopbackTimeout, so binding again throws and the click surfaces as an
+      // unhandled exception on top of a login that was working fine.
+      final probe = LoginProbe();
+      final client = KeycloakClient.withDependencies(
+        clientConfig: ClientConfig(
+          baseUrl: 'http://localhost',
+          realm: 'test',
+          clientId: 'app',
+        ),
+        credentialsStorage: FakeStore(),
+        desktopLoginStrategy: SlowDesktopStrategy(probe),
+        mobileLoginStrategy: SlowMobileStrategy(probe),
+      );
+
+      final first = client.login();
+      final second = client.login();
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(probe.calls, 1, reason: 'a second login flow was started');
+
+      probe.completer.complete(null); // user cancelled
+      await Future.wait([first, second]);
+      expect(probe.calls, 1);
+
+      client.dispose();
+    });
+
+    test('a later call starts a fresh attempt once the first settles',
+        () async {
+      // The guard must release, or a cancelled login would lock the user out
+      // of ever retrying.
+      final probe = LoginProbe();
+      final client = KeycloakClient.withDependencies(
+        clientConfig: ClientConfig(
+          baseUrl: 'http://localhost',
+          realm: 'test',
+          clientId: 'app',
+        ),
+        credentialsStorage: FakeStore(),
+        desktopLoginStrategy: SlowDesktopStrategy(probe),
+        mobileLoginStrategy: SlowMobileStrategy(probe),
+      );
+
+      final first = client.login();
+      probe.completer.complete(null);
+      await first;
+
+      probe.completer = Completer<oauth2.Client?>();
+      final second = client.login();
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(probe.calls, 2, reason: 'the guard never released');
+
+      probe.completer.complete(null);
+      await second;
       client.dispose();
     });
   });

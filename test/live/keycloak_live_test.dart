@@ -12,6 +12,9 @@
 // access grants enabled, and user tester/password123. Skips when nothing is
 // listening on 8080.
 //
+// This file signs sessions out, so it keeps `tester` to itself —
+// desktop_login_live_test.dart runs concurrently under its own user.
+//
 // ignore_for_file: avoid_print — progress output is the point of this file.
 import 'dart:convert';
 import 'dart:io';
@@ -265,25 +268,44 @@ void main() {
     client.dispose();
   });
 
-  liveTest('a revoked session ends with KeycloakSessionExpiredException', () async {
+  liveTest('a dead refresh token ends with KeycloakSessionExpiredException',
+      () async {
+    // The session is made dead by seeding a refresh token the server will
+    // never accept, rather than by logging out first. Keycloak removes a
+    // session asynchronously, so a logout-then-refresh sequence races it and
+    // occasionally refreshed successfully — a flaky test, not a flaky client.
+    // Either way the client takes the same path: invalid_grant from the token
+    // endpoint, so RefreshPermanentFailure.
     final store = MemoryStore();
-    final client = await signedInClient(store);
-
-    // Kill the session out from under the client, the way an admin logging the
-    // user out everywhere would.
-    await http.post(
-      Uri.parse('$_baseUrl/realms/$_realm/protocol/openid-connect/logout'),
-      body: {
-        'client_id': _clientId,
-        'refresh_token': store.creds!.refreshToken,
-      },
+    final grant = await passwordGrant(scopes: const ['openid', 'email', 'profile']);
+    store.creds = UserCredentials(
+      accessToken: grant['access_token'] as String,
+      refreshToken: 'not-a-valid-refresh-token',
+      accessTokenExpiry:
+          DateTime.now().add(Duration(seconds: grant['expires_in'] as int)),
+      refreshTokenExpiry: DateTime.now().add(const Duration(days: 30)),
+      idToken: grant['id_token'] as String?,
     );
+    store.user = await fetchUser(grant['access_token'] as String);
+
+    final client = KeycloakClient.withDependencies(
+      clientConfig: ClientConfig(
+        baseUrl: _baseUrl,
+        realm: _realm,
+        clientId: _clientId,
+      ),
+      credentialsStorage: store,
+    );
+    await client.waitForInitialization();
+    expect(client.authState, AuthState.signedIn);
 
     await expectLater(
       client.refreshToken(),
       throwsA(isA<KeycloakSessionExpiredException>()),
     );
     expect(client.authState, AuthState.sessionExpired);
+    expect(await store.getCredentials(), isNull,
+        reason: 'a permanently failed refresh must clear the session');
     print('  [ok] a dead session surfaces as sessionExpired, not silence');
 
     client.dispose();
