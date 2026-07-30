@@ -21,6 +21,8 @@ final class TokenService {
   final Logger _logger;
   final RefreshOperation _refreshOperation;
   final Duration _refreshTimeout;
+  final Duration _refreshTokenLifetime;
+  final bool _isOfflineSession;
 
   /// Called (and awaited) when the session is permanently invalid.
   final Future<void> Function() onPermanentFailure;
@@ -47,11 +49,15 @@ final class TokenService {
     required this.onTokenRefreshed,
     required Logger logger,
     Duration refreshTimeout = const Duration(seconds: 15),
+    Duration refreshTokenLifetime = const Duration(days: 30),
+    bool isOfflineSession = false,
     RefreshOperation? refreshOperation,
   }) : _store = store,
        _scopes = scopes,
        _logger = logger,
        _refreshTimeout = refreshTimeout,
+       _refreshTokenLifetime = refreshTokenLifetime,
+       _isOfflineSession = isOfflineSession,
        _refreshOperation = refreshOperation ?? ((client, scopes) => client.refreshCredentials(scopes));
 
   /// Exposes the active OAuth2 client for direct HTTP calls (userinfo, logout).
@@ -117,7 +123,14 @@ final class TokenService {
       }
 
       _oauthClient = await _refreshOperation(_oauthClient!, _scopes).timeout(_refreshTimeout);
-      final credentials = UserCredentials.fromOAuth2(_oauthClient!.credentials);
+      // Both flags have to be re-supplied on every refresh: oauth2.Credentials
+      // carries neither, so omitting them would quietly downgrade an offline
+      // session to a 30-day one on its first refresh.
+      final credentials = UserCredentials.fromOAuth2(
+        _oauthClient!.credentials,
+        isOfflineToken: _isOfflineSession,
+        refreshTokenLifetime: _refreshTokenLifetime,
+      );
       await _store.setCredentials(credentials);
 
       final wasFailedBefore = _previousRefreshFailed;

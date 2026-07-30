@@ -125,6 +125,66 @@ void main() {
     });
   });
 
+  group('refreshToken()', () {
+    test('throws KeycloakSessionExpiredException when the session is dead',
+        () async {
+      // Previously this returned normally on a permanent failure, so an awaiting
+      // caller could not tell "refreshed" from "your session just died" without
+      // watching onAuthChange.
+      final store = FakeStore(
+        creds: _creds(accessExpired: false),
+        user: const UserInfo(id: 'u1'),
+      );
+      final client = KeycloakClient.withDependencies(
+        clientConfig: ClientConfig(
+          baseUrl: 'http://localhost',
+          realm: 'test',
+          clientId: 'app',
+        ),
+        credentialsStorage: store,
+        tokenRefreshOperation: (_, _) async =>
+            throw oauth2.AuthorizationException('invalid_grant', null, null),
+      );
+
+      await client.waitForInitialization();
+
+      await expectLater(
+        client.refreshToken(),
+        throwsA(isA<KeycloakSessionExpiredException>()),
+      );
+      expect(client.authState, AuthState.sessionExpired);
+
+      client.dispose();
+    });
+  });
+
+  group('offline sessions', () {
+    test('an offline_access session is stored without a local expiry',
+        () async {
+      final store = FakeStore(
+        creds: _creds(accessExpired: true),
+        user: const UserInfo(id: 'u1'),
+      );
+      final client = KeycloakClient.withDependencies(
+        clientConfig: ClientConfig(
+          baseUrl: 'http://localhost',
+          realm: 'test',
+          clientId: 'app',
+          scopes: const ['openid', 'offline_access'],
+        ),
+        credentialsStorage: store,
+        tokenRefreshOperation: (_, _) async => _refreshedClient(),
+      );
+
+      await client.waitForInitialization();
+
+      expect(store.creds!.isOfflineToken, isTrue);
+      expect(store.creds!.isRefreshExpired, isFalse);
+
+      client.dispose();
+    });
+  });
+
   group('onTokenRefreshed', () {
     KeycloakClient build(FakeStore store, {int? refreshCount}) =>
         KeycloakClient.withDependencies(

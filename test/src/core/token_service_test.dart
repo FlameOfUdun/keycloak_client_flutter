@@ -62,10 +62,14 @@ void main() {
   TokenService _makeService(
     Future<oauth2.Client> Function(oauth2.Client, List<String>) refreshOp, {
     Duration refreshTimeout = const Duration(seconds: 15),
+    Duration refreshTokenLifetime = const Duration(days: 30),
+    bool isOfflineSession = false,
   }) {
     return TokenService(
       store: store,
       scopes: const ['openid'],
+      refreshTokenLifetime: refreshTokenLifetime,
+      isOfflineSession: isOfflineSession,
       onPermanentFailure: () async => permanentCalls++,
       onRecovery: () => recoveryCalls++,
       onTokenRefreshed: () => refreshedCalls++,
@@ -347,6 +351,61 @@ void main() {
         service.dispose();
       },
     );
+  });
+
+  group('refresh preserves session shape', () {
+    /// Runs one successful refresh and returns what was written to the store.
+    Future<UserCredentials> refreshAndCapture({
+      required bool isOfflineSession,
+      Duration refreshTokenLifetime = const Duration(days: 30),
+    }) async {
+      late UserCredentials written;
+      when(() => oauthClient.credentials).thenReturn(_oauth2Creds(_validCreds()));
+      when(() => store.setCredentials(any())).thenAnswer((invocation) async {
+        written = invocation.positionalArguments.first as UserCredentials;
+      });
+
+      final service = _makeService(
+        (_, __) async => oauthClient,
+        isOfflineSession: isOfflineSession,
+        refreshTokenLifetime: refreshTokenLifetime,
+      );
+      service.setClient(oauthClient);
+      await service.attemptRefresh();
+      service.dispose();
+      return written;
+    }
+
+    test('an offline session stays offline across a refresh', () async {
+      // oauth2.Credentials carries neither `refresh_expires_in` nor any offline
+      // marker, so a refresh that does not re-supply them downgrades an offline
+      // session to a dated one. The user is then signed out by initialize()
+      // once that invented expiry passes — against a refresh token Keycloak
+      // would still have accepted.
+      final written = await refreshAndCapture(isOfflineSession: true);
+
+      expect(written.isOfflineToken, isTrue);
+      expect(written.isRefreshExpired, isFalse);
+      expect(written.refreshTokenExpiry.year, 9999);
+    });
+
+    test('a normal session keeps a real expiry', () async {
+      final written = await refreshAndCapture(isOfflineSession: false);
+
+      expect(written.isOfflineToken, isFalse);
+      expect(written.refreshTokenExpiry.year, isNot(9999));
+    });
+
+    test('refreshTokenLifetime sets how far the expiry is pushed', () async {
+      final written = await refreshAndCapture(
+        isOfflineSession: false,
+        refreshTokenLifetime: const Duration(minutes: 30),
+      );
+
+      final remaining = written.refreshTokenExpiry.difference(DateTime.now());
+      expect(remaining, lessThanOrEqualTo(const Duration(minutes: 30)));
+      expect(remaining, greaterThan(const Duration(minutes: 29)));
+    });
   });
 
   group('onTokenRefreshed', () {

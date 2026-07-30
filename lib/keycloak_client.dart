@@ -33,6 +33,9 @@ export 'src/models/platform_config.dart';
 export 'src/interfaces/login_strategy.dart';
 export 'src/interfaces/auth_credentials_store.dart';
 export 'src/interfaces/pending_grant_store.dart';
+// PendingGrant appears in IPendingGrantStore's signature, so anyone
+// implementing that interface needs to be able to name it.
+export 'src/models/pending_grant.dart';
 
 /// Keycloak client for handling authentication, token management, and user
 /// sessions across all platforms.
@@ -116,6 +119,8 @@ final class KeycloakClient {
       onTokenRefreshed: _handleTokenRefreshed,
       logger: _logger,
       refreshTimeout: _clientConfig.refreshTimeout,
+      refreshTokenLifetime: _clientConfig.refreshTokenLifetime,
+      isOfflineSession: _clientConfig.isOfflineSession,
       refreshOperation: _tokenRefreshOperation,
     );
   }
@@ -288,7 +293,11 @@ final class KeycloakClient {
 
   Future<void> _finalizeLogin(Client client) async {
     _tokenService.setClient(client);
-    final credentials = UserCredentials.fromOAuth2(client.credentials);
+    final credentials = UserCredentials.fromOAuth2(
+      client.credentials,
+      isOfflineToken: _clientConfig.isOfflineSession,
+      refreshTokenLifetime: _clientConfig.refreshTokenLifetime,
+    );
     await _credentialsStorage.setCredentials(credentials);
     final user = await _reloadUser();
     if (user == null) {
@@ -379,7 +388,10 @@ final class KeycloakClient {
 
     await waitForInitialization();
 
-    final client = await strategy.handleCallback(uri);
+    final client = await strategy.handleCallback(
+      uri,
+      clientSecret: _clientConfig.clientSecret,
+    );
     if (client == null) return false;
 
     await _finalizeLogin(client);
@@ -423,9 +435,11 @@ final class KeycloakClient {
   /// management or when an admin has changed the user's roles and you need
   /// updated claims without waiting for the scheduled refresh.
   ///
-  /// Throws [KeycloakNetworkException] if the server is unreachable.
-  /// Does nothing if the session has permanently expired (streams will already
-  /// have emitted [AuthState.sessionExpired]).
+  /// Throws [KeycloakNetworkException] if the server is unreachable, and
+  /// [KeycloakSessionExpiredException] if the session turned out to be dead —
+  /// the streams will already have emitted [AuthState.sessionExpired], but a
+  /// caller awaiting this needs to be able to tell that apart from success
+  /// without inspecting them.
   Future<void> refreshToken() async {
     await waitForInitialization();
     final result = await _tokenService.attemptRefresh();
@@ -435,7 +449,7 @@ final class KeycloakClient {
       case RefreshTransientFailure(:final cause):
         throw KeycloakNetworkException(cause);
       case RefreshPermanentFailure():
-        break; // session already ended via onPermanentFailure
+        throw const KeycloakSessionExpiredException();
     }
   }
 
