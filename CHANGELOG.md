@@ -2,6 +2,20 @@
 
 ## 3.0.0
 
+### New
+
+- `onTokenRefreshed` — emits after every successful token refresh while a
+  session is active, on both refresh paths (the scheduled timer and the inline
+  refresh inside `getAuthToken()`). Refreshes were previously invisible from
+  outside the client, which is fine for code that calls `getAuthToken()` per
+  request but not for a connection authenticated once at dial time: a WebSocket
+  or gRPC channel would hold a token that expired underneath it.
+
+  The stream carries no value — call `getAuthToken()` for the new token. Unlike
+  `onAuthChange` and `onUserChange` it does not replay on listen, and it stays
+  silent while signed out, including for the refresh `initialize()` performs on
+  a cold start with an expired access token.
+
 ### Breaking
 
 - Logging now goes through `package:logging` instead of `package:logger`, and

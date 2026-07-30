@@ -211,6 +211,19 @@ StreamBuilder<UserInfo?>(
 );
 ```
 
+Token rotation — for connections authenticated once at dial time:
+
+```dart
+client.onTokenRefreshed.listen((_) async {
+  final token = await client.getAuthToken();
+  socket.redial(token); // the old token is about to expire
+});
+```
+
+Unlike the two streams above, this one does not replay on listen: a rotation is
+an event, not a state. It stays silent while signed out, including during the
+refresh `initialize()` performs on a cold start with an expired access token.
+
 ## Logging
 
 The client logs through `package:logging` under the logger name
@@ -348,6 +361,7 @@ Always:
 - `manageAccount()`: open Keycloak account console in external browser
 - `onAuthChange`: stream of `AuthState`
 - `onUserChange`: stream of `UserInfo?`
+- `onTokenRefreshed`: fires after every successful refresh while signed in; does not replay on listen
 
 ## Auth States
 

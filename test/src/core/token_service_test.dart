@@ -43,6 +43,7 @@ void main() {
   late MockOAuth2Client oauthClient;
   var permanentCalls = 0;
   var recoveryCalls = 0;
+  var refreshedCalls = 0;
   final logger = Logger('TokenServiceTest');
 
   setUpAll(() {
@@ -55,6 +56,7 @@ void main() {
     oauthClient = MockOAuth2Client();
     permanentCalls = 0;
     recoveryCalls = 0;
+    refreshedCalls = 0;
   });
 
   TokenService _makeService(
@@ -66,6 +68,7 @@ void main() {
       scopes: const ['openid'],
       onPermanentFailure: () async => permanentCalls++,
       onRecovery: () => recoveryCalls++,
+      onTokenRefreshed: () => refreshedCalls++,
       logger: logger,
       refreshOperation: refreshOp,
       refreshTimeout: refreshTimeout,
@@ -344,6 +347,52 @@ void main() {
         service.dispose();
       },
     );
+  });
+
+  group('onTokenRefreshed', () {
+    test('fires once on a successful refresh', () async {
+      when(() => oauthClient.credentials).thenReturn(_oauth2Creds(_validCreds()));
+      when(() => store.setCredentials(any())).thenAnswer((_) async {});
+
+      final service = _makeService((_, __) async => oauthClient);
+      service.setClient(oauthClient);
+
+      await service.attemptRefresh();
+
+      expect(refreshedCalls, 1);
+      service.dispose();
+    });
+
+    test('stays silent on a transient failure', () async {
+      // The token did not change, so a consumer holding one has no reason to
+      // re-dial — and the retry is already scheduled.
+      when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
+
+      final service = _makeService(
+        (_, __) async => throw const SocketException('offline'),
+      );
+      service.setClient(oauthClient);
+
+      final result = await service.attemptRefresh();
+
+      expect(result, isA<RefreshTransientFailure>());
+      expect(refreshedCalls, 0);
+      service.dispose();
+    });
+
+    test('stays silent on a permanent failure', () async {
+      final service = _makeService(
+        (_, __) async =>
+            throw oauth2.AuthorizationException('invalid_grant', null, null),
+      );
+      service.setClient(oauthClient);
+
+      final result = await service.attemptRefresh();
+
+      expect(result, isA<RefreshPermanentFailure>());
+      expect(refreshedCalls, 0);
+      service.dispose();
+    });
   });
 
   group('revokeSession', () {

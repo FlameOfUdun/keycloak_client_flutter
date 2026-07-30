@@ -28,6 +28,12 @@ final class TokenService {
   /// Called when refresh transitions from failing to succeeding (network recovery).
   final void Function() onRecovery;
 
+  /// Called after every successful refresh, once the new credentials are stored.
+  ///
+  /// Fires on both refresh paths — the scheduled timer and the inline refresh
+  /// inside `getAuthToken()` — because both run through [attemptRefresh].
+  final void Function() onTokenRefreshed;
+
   oauth2.Client? _oauthClient;
   Completer<RefreshResult>? _refreshCompleter;
   Timer? _refreshTimer;
@@ -38,6 +44,7 @@ final class TokenService {
     required List<String> scopes,
     required this.onPermanentFailure,
     required this.onRecovery,
+    required this.onTokenRefreshed,
     required Logger logger,
     Duration refreshTimeout = const Duration(seconds: 15),
     RefreshOperation? refreshOperation,
@@ -116,6 +123,11 @@ final class TokenService {
       final wasFailedBefore = _previousRefreshFailed;
       _previousRefreshFailed = false;
       scheduleRefresh(credentials);
+
+      // Before onRecovery: that one kicks off a userinfo round trip, and a
+      // consumer waiting to re-dial with the new token should not queue
+      // behind it.
+      onTokenRefreshed();
 
       if (wasFailedBefore) onRecovery();
 

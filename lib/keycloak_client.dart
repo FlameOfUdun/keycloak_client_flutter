@@ -49,6 +49,8 @@ final class KeycloakClient {
   final RefreshOperation? _tokenRefreshOperation;
   final _logger = Logger('KeycloakClient');
 
+  final _tokenRefreshed = StreamController<void>.broadcast();
+
   Completer<void>? _initCompleter;
   bool _initialized = false;
   bool _disposed = false;
@@ -111,6 +113,7 @@ final class KeycloakClient {
       scopes: _clientConfig.scopes,
       onPermanentFailure: () => _endSession(AuthState.sessionExpired),
       onRecovery: () => _reloadUser().ignore(),
+      onTokenRefreshed: _handleTokenRefreshed,
       logger: _logger,
       refreshTimeout: _clientConfig.refreshTimeout,
       refreshOperation: _tokenRefreshOperation,
@@ -125,6 +128,31 @@ final class KeycloakClient {
 
   /// Emits the current [AuthState] immediately on listen, then on every change.
   Stream<AuthState> get onAuthChange => _bufferedStream(_sessionManager.authStream, () => authState);
+
+  /// Emits after every successful token refresh, while a session is active.
+  ///
+  /// The new token is not carried — call [getAuthToken] for it. This exists for
+  /// consumers that authenticate a long-lived connection once at dial time (a
+  /// WebSocket, a gRPC channel) and so never re-read the token on their own.
+  /// Without a signal, such a connection keeps a token that expires underneath
+  /// it, which only fails in the field once the old token lapses.
+  ///
+  /// Unlike [onAuthChange] and [onUserChange] this does not replay on listen: a
+  /// rotation is an event, not a state, so there is nothing current to emit.
+  ///
+  /// Silent during the refresh [initialize] performs on a cold start with an
+  /// expired access token — no session exists at that point, and the session
+  /// that follows is announced on the other two streams.
+  Stream<void> get onTokenRefreshed {
+    _assertNotDisposed();
+    return _tokenRefreshed.stream;
+  }
+
+  void _handleTokenRefreshed() {
+    if (!_sessionManager.authState.isSignedIn) return;
+    if (_tokenRefreshed.isClosed) return;
+    _tokenRefreshed.add(null);
+  }
 
   Stream<T> _bufferedStream<T>(Stream<T> broadcast, T Function() current) {
     _assertNotDisposed();
@@ -465,6 +493,7 @@ final class KeycloakClient {
     if (_disposed) return;
     _disposed = true;
     _logger.info('Disposing KeycloakClient.');
+    _tokenRefreshed.close();
     _sessionManager.dispose();
     _tokenService.dispose();
   }
