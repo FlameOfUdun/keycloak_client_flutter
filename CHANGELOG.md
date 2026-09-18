@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 4.0.0
+
+### New
+
+- Service-account mode: `ClientConfig.grantType: GrantType.clientCredentials`
+  makes `login()` use the OAuth2 client-credentials grant with `clientId` and
+  `clientSecret`, with no browser. Expired tokens are renewed with a new grant.
+  `invalid_client` / `unauthorized_client` during renewal end the session
+  instead of retrying forever. `manageAccount()`, `getAccountCredentials()` and
+  `handleWebCallback()` throw `UnsupportedError` in this mode. The default,
+  `GrantType.authorizationCode`, leaves existing behaviour unchanged.
+- `package:http` is now a direct dependency (it already came in through
+  `oauth2`).
+
+### Bug Fixes
+
+- A token refresh that finishes after the session has ended (e.g. `logout()`
+  while a refresh is in flight) is now discarded: it no longer stores
+  credentials, schedules another refresh, or flips `AuthState.signedOut` to
+  `sessionExpired`.
+- A refresh that fails with a malformed token response (e.g. a proxy's 5xx
+  page) or an `http.ClientException` is now retried like other network
+  errors, instead of silently stopping the refresh timer.
+
 ## 3.0.0
 
 ### New

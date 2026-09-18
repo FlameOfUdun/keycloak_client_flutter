@@ -102,10 +102,11 @@ final client = KeycloakClient(
 - `baseUrl`: Keycloak server root
 - `realm`: Keycloak realm name
 - `clientId`: OAuth client ID
-- `clientSecret`: for confidential clients only
+- `clientSecret`: for confidential clients; required with `GrantType.clientCredentials`
 - `scopes`: defaults to `openid`, `email`, `profile`. Include `offline_access` for a long-lived session — the client detects it here and stores the refresh token with no local expiry
 - `refreshTokenLifetime`: how long a refresh token is assumed to last — defaults to 30 days. `package:oauth2` drops the server's `refresh_expires_in`, so this is assumed rather than read; set it to match your realm's **SSO Session Max**. Ignored for `offline_access` sessions
 - `refreshTimeout`: HTTP timeout for each token refresh attempt — defaults to `Duration(seconds: 15)`. Lower for faster offline detection; raise for high-latency deployments.
+- `grantType`: `GrantType.authorizationCode` (default, browser login) or `GrantType.clientCredentials` (service account, see below)
 
 Platform config defaults:
 
@@ -118,6 +119,41 @@ For desktop, these two values have different jobs:
 
 - `DesktopConfig.redirectUri`: the URI sent to Keycloak
 - `DesktopConfig.loopbackUri`: the local URI the desktop app listens on
+
+## Service Accounts
+
+To authenticate as the client's own Keycloak service account instead of a
+user, set `grantType`:
+
+```dart
+final client = KeycloakClient(
+  clientConfig: ClientConfig(
+    baseUrl: 'https://auth.example.com',
+    realm: 'my-realm',
+    clientId: 'my-backend',
+    clientSecret: '...',
+    grantType: GrantType.clientCredentials,
+  ),
+);
+
+await client.login();                      // no browser
+final token = await client.getAuthToken(); // renewed automatically
+```
+
+In Keycloak, turn on **Client authentication** and **Service accounts roles**
+for the client.
+
+- `login()` fetches a token with the client ID and secret. When the token
+  expires, a new one is fetched the same way; there is no refresh token.
+- `currentUser` is Keycloak's `service-account-<clientId>` user.
+- `logout()` only clears the local session.
+- `manageAccount()`, `getAccountCredentials()` and `handleWebCallback()`
+  throw `UnsupportedError`.
+- If Keycloak rejects the secret during renewal, the session ends as
+  `AuthState.sessionExpired`.
+
+> **Never ship a client secret in a public mobile, web or desktop build.**
+> Anyone can extract it. Use this mode only on machines you control.
 
 ## Dev Redirect Helper
 
