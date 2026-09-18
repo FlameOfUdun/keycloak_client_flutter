@@ -72,6 +72,10 @@ final class KeycloakClient {
   bool _disposed = false;
   KeycloakRoles? _roles;
 
+  /// The session end started by a refresh that lost a required role, kept so
+  /// [refreshToken] can wait for it before reporting the denial.
+  Future<void>? _denial;
+
   /// Creates a [KeycloakClient] from a single configuration object.
   KeycloakClient({required ClientConfig clientConfig, WebConfig? webConfig, MobileConfig? mobileConfig, DesktopConfig? desktopConfig})
     : _clientConfig = clientConfig,
@@ -236,7 +240,8 @@ final class KeycloakClient {
     if (!_sessionManager.authState.isSignedIn) return;
     final token = _tokenService.oauthClient?.credentials.accessToken;
     if (token != null && _checkRoles(token) != null) {
-      _denyAccess(AuthState.accessDenied).ignore();
+      final denial = _denyAccess(AuthState.accessDenied)..ignore();
+      _denial = denial;
       return;
     }
     if (_tokenRefreshed.isClosed) return;
@@ -432,8 +437,15 @@ final class KeycloakClient {
       await _denyAccess(AuthState.signedOut);
       throw KeycloakAccessDeniedException(missing);
     }
-    final user = await _reloadUser();
+    final UserInfo? user;
+    try {
+      user = await _reloadUser();
+    } catch (_) {
+      _roles = null;
+      rethrow;
+    }
     if (user == null) {
+      _roles = null;
       throw KeycloakServerException(0, 'Could not load user after login');
     }
     _sessionManager.beginSession(user);
@@ -553,16 +565,17 @@ final class KeycloakClient {
     _sessionManager.endSession(reason);
   }
 
-  /// Checks [accessToken] against the required roles. Returns the missing ones,
-  /// or `null` when all are held, in which case the token's roles become [roles].
+  /// Checks [accessToken] against the required roles, returning the missing
+  /// ones or `null` when all are held. Either way the token's roles become
+  /// [roles], so they never report a role the current token has lost.
   KeycloakRoles? _checkRoles(String accessToken) {
     final granted = KeycloakRoles.fromAccessToken(accessToken);
+    _roles = granted;
     final missing = _clientConfig.missingRoles(granted);
     if (!missing.isEmpty) {
       _logger.warning('Required roles missing: $missing');
       return missing;
     }
-    _roles = granted;
     return null;
   }
 
@@ -608,7 +621,16 @@ final class KeycloakClient {
     switch (result) {
       case RefreshSuccess(:final credentials):
         final missing = _clientConfig.missingRoles(KeycloakRoles.fromAccessToken(credentials.accessToken));
-        if (!missing.isEmpty) throw KeycloakAccessDeniedException(missing);
+        if (!missing.isEmpty) {
+          // Let the session end first, so a caller catching this sees
+          // accessDenied rather than a session that is still signed in.
+          try {
+            await _denial;
+          } catch (_) {
+            // The denial's own failure is not this caller's to handle.
+          }
+          throw KeycloakAccessDeniedException(missing);
+        }
         _reloadUser().ignore();
       case RefreshTransientFailure(:final cause):
         throw KeycloakNetworkException(cause);

@@ -809,6 +809,7 @@ void main() {
       final sub = client.onTokenRefreshed.listen(rotations.add);
       store.creds = _storedToken(_tokenWithRealmRoles(['staff']), accessExpired: true);
       final token = await client.getAuthToken();
+      expect(client.roles?.hasRealmRole('staff'), isNot(true), reason: 'roles reported a role the token has lost');
       await Future.delayed(const Duration(milliseconds: 50));
 
       expect(token, isNull, reason: 'a token without the role was handed out');
@@ -817,6 +818,37 @@ void main() {
       expect(rotations, isEmpty);
 
       await sub.cancel();
+      client.dispose();
+    });
+
+    test('a login whose user cannot be loaded leaves no roles behind', () async {
+      final transport = MockClient((request) async => http.Response('', 500));
+      final client = loginClient(_staffOnly(), FakeStore(), _clientWithToken(_tokenWithRealmRoles(['staff']), transport));
+
+      await expectLater(client.login(), throwsA(isA<KeycloakServerException>()));
+
+      expect(client.roles, isNull);
+
+      client.dispose();
+    });
+
+    test('refreshToken() losing a required role throws once access is denied', () async {
+      final server = FakeUserServer();
+      final store = FakeStore(creds: _storedToken(_tokenWithRealmRoles(['staff'])), user: const UserInfo(id: 'u1'));
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _staffOnly(),
+        credentialsStorage: store,
+        httpClient: server.client,
+        tokenRefreshOperation: (_, _) async => _clientWithToken(_tokenWithRealmRoles(['user']), server.client),
+      );
+      await client.waitForInitialization();
+      expect(client.authState, AuthState.signedIn);
+
+      await expectLater(client.refreshToken(), throwsA(isA<KeycloakAccessDeniedException>()));
+
+      expect(client.authState, AuthState.accessDenied);
+      expect(store.creds, isNull);
+
       client.dispose();
     });
 
