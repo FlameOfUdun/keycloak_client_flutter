@@ -112,6 +112,7 @@ final client = KeycloakClient(
 Platform config defaults:
 
 - `MobileConfig.redirectUri`: `myapp://auth`
+- `MobileConfig.preferEphemeral`: `true` — a private auth session: no iOS "wants to use … to Sign In" prompt and no cookies shared with the browser. Set `false` for single sign-on with the browser's Keycloak session
 - `DesktopConfig.redirectUri`: `https://winchetechnologies.co.uk/tools/oauth_redirect`
 - `DesktopConfig.loopbackUri`: `http://localhost:8765/callback`
 - `WebConfig.redirectUri`: `https://winchetechnologies.co.uk/tools/oauth_redirect`
@@ -188,6 +189,23 @@ This is a UX guard. The token's signature isn't checked, and anyone can modify
 an app, so your API must enforce roles itself. To block the login in Keycloak
 itself, add a *Condition – user role* + *Deny access* step to the browser
 flow.
+
+## Custom Login and Storage
+
+Every dependency can be replaced through the public constructor:
+
+```dart
+final client = KeycloakClient(
+  clientConfig: config,
+  credentialsStorage: MyStore(),            // default: SecureStorageAuthCredentialsStore
+  mobileLoginStrategy: MyMobileStrategy(),  // implements IMobileLoginStrategy
+);
+```
+
+Only the strategy for the platform the app runs on is used. A custom strategy
+can reuse `generateCodeVerifier()` and `generateState()` for PKCE, and
+`SecureStorageAuthCredentialsStore` is exported so it can be wrapped or
+reused.
 
 ## Dev Redirect Helper
 
@@ -338,21 +356,30 @@ For desktop dev with the helper endpoint:
 
 ## Android
 
-Add the deep-link intent filter to your `MainActivity` in `android/app/src/main/AndroidManifest.xml`:
+Mobile login runs in an Auth Tab / Custom Tab via
+[`flutter_web_auth_2`](https://pub.dev/packages/flutter_web_auth_2). Register
+its callback activity for your redirect scheme in
+`android/app/src/main/AndroidManifest.xml`, inside `<application>`:
 
 ```xml
 <activity
-    android:name=".MainActivity"
+    android:name="com.linusu.flutter_web_auth_2.CallbackActivity"
     android:exported="true"
-    android:launchMode="singleTop">
-    <intent-filter>
+    android:taskAffinity="">
+    <intent-filter android:label="flutter_web_auth_2">
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="myapp" android:host="auth"/>
+        <data android:scheme="myapp"/>
     </intent-filter>
 </activity>
 ```
+
+Remove any `VIEW` intent filter for this scheme from `MainActivity`; two
+activities claiming it makes Android ask the user which one to open. Also set
+`android:taskAffinity=""` on `MainActivity`, as `flutter_web_auth_2`
+recommends. `flutter_web_auth_2` compiles against Android SDK 36, so your app
+may need `compileSdk = 36`.
 
 Also ensure internet permission exists:
 
@@ -360,31 +387,15 @@ Also ensure internet permission exists:
 <uses-permission android:name="android.permission.INTERNET"/>
 ```
 
-Your `MobileConfig.redirectUri` must match the scheme/host you register here.
+For an `https` redirect (App Links), use `https` as the scheme in the intent
+filter with your host, and set `MobileConfig.redirectUri` to the full URL.
 
 ## iOS
 
-Add your custom scheme to `ios/Runner/Info.plist`:
-
-```xml
-<key>CFBundleURLTypes</key>
-<array>
-  <dict>
-    <key>CFBundleTypeRole</key>
-    <string>Editor</string>
-    <key>CFBundleURLName</key>
-    <string>myapp</string>
-    <key>CFBundleURLSchemes</key>
-    <array>
-      <string>myapp</string>
-    </array>
-  </dict>
-</array>
-```
-
-Only the scheme goes in `CFBundleURLSchemes`. For the default
-`MobileConfig.redirectUri` of `myapp://auth`, iOS registers `myapp` here and
-your Dart config keeps the full redirect URI.
+Mobile login runs in an `ASWebAuthenticationSession` sheet over your app, and
+it matches the redirect scheme itself. A custom scheme such as
+`myapp://auth` needs no `Info.plist` entry. An `https` redirect (universal
+link) requires iOS 17.4 or later and an associated domain.
 
 ## macOS / Windows / Linux
 
@@ -401,6 +412,17 @@ The app always listens on `loopbackUri` while Keycloak redirects to `redirectUri
 - register `https://winchetechnologies.co.uk/tools/oauth_redirect` in Keycloak
 - keep `loopbackUri` on a local port like `http://localhost:8765/callback`
 - when the helper page opens, enter that local port so it forwards the callback back to your app
+
+**Linux build requirement:** `flutter_web_auth_2` is a single all-platform
+plugin; its desktop side depends on `desktop_webview_window`, whose CMake
+requires the WebKitGTK and libsoup development packages to be installed even
+though desktop login here doesn't use `flutter_web_auth_2`. On Debian/Ubuntu:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev
+```
+
+(Older distros may need `libwebkit2gtk-4.0-dev` / `libsoup2.4-dev` instead.)
 
 ## Web
 
@@ -459,5 +481,5 @@ return normally when the IdP reports `access_denied`.
 ## Notes
 
 - Call `initialize()` before `login()`, `logout()`, or `reloadUser()`
-- Credentials are stored with `flutter_secure_storage`
+- Credentials are stored with `flutter_secure_storage` by default (`SecureStorageAuthCredentialsStore`); pass `credentialsStorage` to change it
 - User profile data comes from Keycloak's `/userinfo` endpoint

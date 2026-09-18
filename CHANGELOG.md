@@ -6,6 +6,26 @@
 
 - `AuthState.accessDenied` is a new value. Exhaustive `switch`es over
   `AuthState` need an arm for it.
+- Mobile login now runs in an in-app auth session (`ASWebAuthenticationSession`
+  on iOS, Auth Tab / Custom Tabs on Android) via `flutter_web_auth_2`, instead
+  of opening the system browser and waiting for a deep link. On iOS this
+  removes the "Open in app?" prompt and the Safari window left behind.
+  - Android: move the `VIEW` intent filter from `MainActivity` to
+    `com.linusu.flutter_web_auth_2.CallbackActivity` (see README). Apps may
+    need `compileSdk = 36`.
+  - iOS: the `CFBundleURLTypes` entry for the redirect scheme is no longer
+    needed.
+- `MobileConfig.deepLinkTimeout` is removed: the auth session has no timeout,
+  and on Android an abandoned login is cancelled when the user returns to the
+  app. `login()` returns `null` on cancellation, as before.
+- Requires Flutter 3.24 or later. `app_links` is no longer a dependency.
+- `flutter_web_auth_2` is a single all-platform plugin; its desktop side
+  depends on `desktop_webview_window` (+ `window_to_front`), unused by desktop
+  login here. Building on Linux now requires the WebKitGTK and libsoup
+  development packages (`sudo apt install libwebkit2gtk-4.1-dev
+  libsoup-3.0-dev` on Debian/Ubuntu; see README). On Windows/Linux, the app's
+  plugin registrant now also includes `desktop_webview_window` and
+  `window_to_front`, which is harmless.
 
 ### New
 
@@ -27,6 +47,13 @@
   (`AuthState.isAccessDenied`). The Keycloak session is revoked in both cases.
   `ClientConfig.missingRoles` reports which required roles a `KeycloakRoles`
   lacks.
+- `MobileConfig.preferEphemeral` (default `true`): a private auth session with
+  no iOS sign-in prompt; `false` shares the browser's Keycloak session.
+- `KeycloakClient(...)` accepts `credentialsStorage`, `mobileLoginStrategy`,
+  `desktopLoginStrategy` and `webLoginStrategy`, so a custom strategy or store
+  no longer needs the `@visibleForTesting` `withDependencies` constructor.
+- `SecureStorageAuthCredentialsStore`, `generateCodeVerifier()` and
+  `generateState()` are exported.
 
 ### Bug Fixes
 
