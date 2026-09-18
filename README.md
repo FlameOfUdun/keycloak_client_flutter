@@ -451,7 +451,7 @@ The package throws typed exceptions:
 - `KeycloakServerException` — a non-2xx response, or an IdP `error` in the login callback other than `access_denied`
 - `KeycloakSessionExpiredException` — thrown by `refreshToken()` when the session is permanently dead and the user must sign in again
 - `KeycloakTimeoutException` — the user never came back from the browser, or a web grant aged past `pendingGrantTTL`
-- `KeycloakAccessDeniedException` — `login()` found the principal lacks a required role; the session was already ended
+- `KeycloakAccessDeniedException` — thrown by `login()`, `handleWebCallback()` and `refreshToken()` when the principal lacks a required role; the session was already ended
 
 A cancelled login is not an exception: `login()` and `handleWebCallback()`
 return normally when the IdP reports `access_denied`.

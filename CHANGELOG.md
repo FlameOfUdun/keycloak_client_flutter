@@ -10,20 +10,23 @@
 ### New
 
 - Service-account mode: `ClientConfig.grantType: GrantType.clientCredentials`
-  makes `login()` use the OAuth2 client-credentials grant with `clientId` and
-  `clientSecret`, with no browser. Expired tokens are renewed with a new grant.
+  (the newly exported `GrantType` enum; `ClientConfig.isServiceAccount` tells
+  the modes apart) makes `login()` use the OAuth2 client-credentials grant
+  with `clientId` and `clientSecret`, with no browser. Expired tokens are renewed with a new grant.
   `invalid_client` / `unauthorized_client` during renewal end the session
   instead of retrying forever. `manageAccount()`, `getAccountCredentials()` and
   `handleWebCallback()` throw `UnsupportedError` in this mode. The default,
   `GrantType.authorizationCode`, leaves existing behaviour unchanged.
 - `package:http` is now a direct dependency (it already came in through
   `oauth2`).
-- `KeycloakClient.roles`: realm and client roles from the access token,
-  updated on every refresh.
+- `KeycloakClient.roles`: realm and client roles from the access token, as the
+  newly exported `KeycloakRoles`, updated on every refresh.
 - `ClientConfig.requiredRealmRoles` / `requiredClientRoles`: a principal
   without them is rejected at login with `KeycloakAccessDeniedException`, and a
-  restored or refreshed session without them ends as `AuthState.accessDenied`.
-  The Keycloak session is revoked in both cases.
+  restored or refreshed session without them ends as `AuthState.accessDenied`
+  (`AuthState.isAccessDenied`). The Keycloak session is revoked in both cases.
+  `ClientConfig.missingRoles` reports which required roles a `KeycloakRoles`
+  lacks.
 
 ### Bug Fixes
 

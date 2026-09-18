@@ -375,7 +375,15 @@ final class KeycloakClient {
   ///            completes — the tab is unloading. Call [handleWebCallback]
   ///            on the next page load to finalise the session.
   ///
+  /// In service-account mode ([GrantType.clientCredentials]) no browser is
+  /// involved: this runs the client-credentials grant with the client ID and
+  /// secret.
+  ///
   /// Returns normally (without throwing) if the user cancels.
+  ///
+  /// Throws [KeycloakAccessDeniedException] when the principal lacks a role in
+  /// [ClientConfig.requiredRealmRoles] or [ClientConfig.requiredClientRoles];
+  /// the session has already been ended and the state is [AuthState.signedOut].
   ///
   /// Calling this while a login is already running joins that attempt instead
   /// of starting a second one, so an impatient double-tap is a no-op rather
@@ -622,7 +630,9 @@ final class KeycloakClient {
   /// [KeycloakSessionExpiredException] if the session turned out to be dead —
   /// the streams will already have emitted [AuthState.sessionExpired], but a
   /// caller awaiting this needs to be able to tell that apart from success
-  /// without inspecting them.
+  /// without inspecting them. Throws [KeycloakAccessDeniedException] if the
+  /// refreshed token lacks a required role; the session has then already ended
+  /// as [AuthState.accessDenied].
   Future<void> refreshToken() async {
     await waitForInitialization();
     final result = await _tokenService.attemptRefresh();

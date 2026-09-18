@@ -1,4 +1,4 @@
-/// How [KeycloakClient] obtains its tokens.
+/// How `KeycloakClient` obtains its tokens.
 enum GrantType {
   /// Interactive Authorization Code + PKCE login in a browser. The default.
   authorizationCode,
