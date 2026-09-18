@@ -87,23 +87,40 @@ final class KeycloakClient {
   /// must not hand it out in the meantime.
   bool _denying = false;
 
-  /// Creates a [KeycloakClient] from a single configuration object.
-  KeycloakClient({required ClientConfig clientConfig, WebConfig? webConfig, MobileConfig? mobileConfig, DesktopConfig? desktopConfig})
-    : _clientConfig = clientConfig,
-      _desktopConfig = desktopConfig ?? const DesktopConfig(),
-      _mobileConfig = mobileConfig ?? const MobileConfig(),
-      _webConfig = webConfig ?? const WebConfig(),
-      _credentialsStorage = const SecureStorageAuthCredentialsStore(),
-      _tokenRefreshOperation = null,
-      _httpClient = null,
-      _loginStrategy = defaultLoginStrategy {
+  /// Creates a [KeycloakClient].
+  ///
+  /// [credentialsStorage] defaults to [SecureStorageAuthCredentialsStore]. The
+  /// login strategies default to the built-in one for each platform; only the
+  /// one for the platform the app runs on is used, so an app can pass just
+  /// the one it replaces.
+  KeycloakClient({
+    required ClientConfig clientConfig,
+    WebConfig? webConfig,
+    MobileConfig? mobileConfig,
+    DesktopConfig? desktopConfig,
+    IAuthCredentialsStore? credentialsStorage,
+    IMobileLoginStrategy? mobileLoginStrategy,
+    IDesktopLoginStrategy? desktopLoginStrategy,
+    IWebLoginStrategy? webLoginStrategy,
+  }) : _clientConfig = clientConfig,
+       _desktopConfig = desktopConfig ?? const DesktopConfig(),
+       _mobileConfig = mobileConfig ?? const MobileConfig(),
+       _webConfig = webConfig ?? const WebConfig(),
+       _credentialsStorage = credentialsStorage ?? const SecureStorageAuthCredentialsStore(),
+       _tokenRefreshOperation = null,
+       _httpClient = null,
+       _loginStrategy = _selectLoginStrategy(
+         desktopOverride: desktopLoginStrategy,
+         mobileOverride: mobileLoginStrategy,
+         webOverride: webLoginStrategy,
+       ) {
     _createInternals();
   }
 
   @visibleForTesting
   KeycloakClient.withDependencies({
     required ClientConfig clientConfig,
-    required IAuthCredentialsStore credentialsStorage,
+    IAuthCredentialsStore? credentialsStorage,
     WebConfig? webConfig,
     MobileConfig? mobileConfig,
     DesktopConfig? desktopConfig,
@@ -116,7 +133,7 @@ final class KeycloakClient {
        _desktopConfig = desktopConfig ?? const DesktopConfig(),
        _mobileConfig = mobileConfig ?? const MobileConfig(),
        _webConfig = webConfig ?? const WebConfig(),
-       _credentialsStorage = credentialsStorage,
+       _credentialsStorage = credentialsStorage ?? const SecureStorageAuthCredentialsStore(),
        _tokenRefreshOperation = tokenRefreshOperation,
        _httpClient = httpClient,
        _loginStrategy = _selectLoginStrategy(

@@ -1012,4 +1012,35 @@ void main() {
       client.dispose();
     });
   });
+
+  group('public constructor', () {
+    test('uses an injected login strategy and credentials store', () async {
+      final probe = LoginProbe()..completer.complete(null); // user cancels
+      final client = KeycloakClient(
+        clientConfig: const ClientConfig(baseUrl: 'http://localhost', realm: 'test', clientId: 'app'),
+        credentialsStorage: FakeStore(),
+        // flutter_test pins the platform to android, so the mobile one is used.
+        mobileLoginStrategy: SlowMobileStrategy(probe),
+        desktopLoginStrategy: SlowDesktopStrategy(probe),
+      );
+
+      await client.login();
+
+      expect(probe.calls, 1, reason: 'the injected strategy was not used');
+      client.dispose();
+    });
+
+    test('restores a session from an injected store', () async {
+      final client = KeycloakClient(
+        clientConfig: const ClientConfig(baseUrl: 'http://localhost', realm: 'test', clientId: 'app'),
+        credentialsStorage: FakeStore(creds: _creds(accessExpired: false), user: const UserInfo(id: 'u1')),
+      );
+
+      await client.waitForInitialization();
+
+      expect(client.authState, AuthState.signedIn);
+      expect(client.currentUser?.id, 'u1');
+      client.dispose();
+    });
+  });
 }
