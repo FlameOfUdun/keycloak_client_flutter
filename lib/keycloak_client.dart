@@ -423,6 +423,7 @@ final class KeycloakClient {
   /// Throws [KeycloakNetworkException] on transport failure and
   /// [KeycloakServerException] on a non-2xx response.
   Future<List<AccountCredential>> getAccountCredentials() async {
+    _assertUserFlow('getAccountCredentials()');
     await waitForInitialization();
 
     final token = await getAuthToken();
@@ -460,6 +461,7 @@ final class KeycloakClient {
   /// Throws [KeycloakNetworkException] if the platform cannot launch a browser.
   Future<void> manageAccount() async {
     _assertNotDisposed();
+    _assertUserFlow('manageAccount()');
 
     final url = _clientConfig.accountEndpoint;
     _logger.info('Opening account console: $url');
@@ -484,6 +486,7 @@ final class KeycloakClient {
   /// await KeycloakClient.handleWebCallback(Uri.base);
   /// ```
   Future<bool> handleWebCallback(Uri uri) async {
+    _assertUserFlow('handleWebCallback()');
     final strategy = _loginStrategy;
     if (strategy is! IWebLoginStrategy) {
       throw StateError('handleWebCallback can only be used with WebLoginStrategy.');
@@ -508,7 +511,8 @@ final class KeycloakClient {
     _logger.info('Logging out: ${currentUser?.id ?? 'unknown'}');
 
     final stored = await _credentialsStorage.getCredentials();
-    if (stored != null) {
+    // A service account has no refresh token and no browser session to end.
+    if (stored != null && !_clientConfig.isServiceAccount) {
       await _tokenService.revokeSession(
         logoutEndpoint: _clientConfig.logoutEndpoint,
         clientId: _clientConfig.clientId,
@@ -604,6 +608,12 @@ final class KeycloakClient {
 
   void _assertNotDisposed() {
     if (_disposed) throw StateError('KeycloakClient has been disposed.');
+  }
+
+  void _assertUserFlow(String method) {
+    if (_clientConfig.isServiceAccount) {
+      throw UnsupportedError('$method is not available with GrantType.clientCredentials.');
+    }
   }
 
   void dispose() {

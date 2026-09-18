@@ -638,5 +638,39 @@ void main() {
 
       client.dispose();
     });
+
+    test('logout() clears the session without calling the server', () async {
+      final kc = FakeKeycloak();
+      final store = FakeStore();
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(),
+        credentialsStorage: store,
+        httpClient: kc.client,
+      );
+      await client.login();
+      final before = kc.requests.length;
+
+      await client.logout();
+
+      expect(kc.requests, hasLength(before), reason: 'logout contacted Keycloak');
+      expect(client.authState, AuthState.signedOut);
+      expect(store.creds, isNull);
+
+      client.dispose();
+    });
+
+    test('user-only methods throw UnsupportedError', () async {
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(),
+        credentialsStorage: FakeStore(),
+        httpClient: FakeKeycloak().client,
+      );
+
+      await expectLater(client.manageAccount(), throwsUnsupportedError);
+      await expectLater(client.getAccountCredentials(), throwsUnsupportedError);
+      await expectLater(client.handleWebCallback(Uri.parse('http://localhost/cb')), throwsUnsupportedError);
+
+      client.dispose();
+    });
   });
 }
