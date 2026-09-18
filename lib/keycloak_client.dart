@@ -2,8 +2,10 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
 import 'package:oauth2/oauth2.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -51,6 +53,10 @@ final class KeycloakClient {
   final MobileConfig _mobileConfig;
   final WebConfig _webConfig;
   final RefreshOperation? _tokenRefreshOperation;
+
+  /// Transport for the client-credentials grant. Null in production, where
+  /// each grant opens its own connection; tests inject a fake.
+  final http.Client? _httpClient;
   final _logger = Logger('KeycloakClient');
 
   final _tokenRefreshed = StreamController<void>.broadcast();
@@ -68,6 +74,7 @@ final class KeycloakClient {
       _webConfig = webConfig ?? const WebConfig(),
       _credentialsStorage = const SecureStorageAuthCredentialsStore(),
       _tokenRefreshOperation = null,
+      _httpClient = null,
       _loginStrategy = defaultLoginStrategy {
     _createInternals();
   }
@@ -83,12 +90,14 @@ final class KeycloakClient {
     IMobileLoginStrategy? mobileLoginStrategy,
     IWebLoginStrategy? webLoginStrategy,
     RefreshOperation? tokenRefreshOperation,
+    http.Client? httpClient,
   }) : _clientConfig = clientConfig,
        _desktopConfig = desktopConfig ?? const DesktopConfig(),
        _mobileConfig = mobileConfig ?? const MobileConfig(),
        _webConfig = webConfig ?? const WebConfig(),
        _credentialsStorage = credentialsStorage,
        _tokenRefreshOperation = tokenRefreshOperation,
+       _httpClient = httpClient,
        _loginStrategy = _selectLoginStrategy(
          desktopOverride: desktopLoginStrategy,
          mobileOverride: mobileLoginStrategy,
@@ -112,6 +121,13 @@ final class KeycloakClient {
   }
 
   void _createInternals() {
+    if (_clientConfig.isServiceAccount && (_clientConfig.clientSecret?.isEmpty ?? true)) {
+      throw ArgumentError.value(
+        _clientConfig.clientSecret,
+        'clientConfig.clientSecret',
+        'is required with GrantType.clientCredentials',
+      );
+    }
     _sessionManager = SessionManager();
     _tokenService = TokenService(
       store: _credentialsStorage,
@@ -122,9 +138,52 @@ final class KeycloakClient {
       logger: _logger,
       refreshTimeout: _clientConfig.refreshTimeout,
       refreshTokenLifetime: _clientConfig.refreshTokenLifetime,
-      isOfflineSession: _clientConfig.isOfflineSession,
-      refreshOperation: _tokenRefreshOperation,
+      isOfflineSession: _noLocalRefreshExpiry,
+      refreshOperation: _tokenRefreshOperation ?? (_clientConfig.isServiceAccount ? _renewServiceAccountToken : null),
+      permanentAuthErrors: _clientConfig.isServiceAccount
+          ? const {'invalid_grant', 'invalid_client', 'unauthorized_client'}
+          : null,
     );
+  }
+
+  /// Offline tokens and service accounts both have no refresh-token expiry
+  /// the client can know: an offline token's is server-side only, and a
+  /// service account has no refresh token at all, only a secret that stays
+  /// valid until it is rotated.
+  bool get _noLocalRefreshExpiry => _clientConfig.isOfflineSession || _clientConfig.isServiceAccount;
+
+  Future<Client> _clientCredentialsGrant() => clientCredentialsGrant(
+    _clientConfig.tokenEndpoint,
+    _clientConfig.clientId,
+    _clientConfig.clientSecret,
+    scopes: _clientConfig.scopes,
+    httpClient: _httpClient,
+  );
+
+  /// The service-account "refresh": there is no refresh token, so a new grant
+  /// replaces the old client, which is then closed to free its connection.
+  Future<Client> _renewServiceAccountToken(Client current, List<String> _) async {
+    final next = await _clientCredentialsGrant();
+    current.close();
+    return next;
+  }
+
+  /// Runs the client-credentials grant for [login], mapping failures onto the
+  /// same exceptions the browser strategies throw.
+  Future<Client> _serviceAccountLogin() async {
+    try {
+      return await _clientCredentialsGrant().timeout(_clientConfig.refreshTimeout);
+    } on AuthorizationException catch (e) {
+      throw KeycloakServerException(400, e.error);
+    } on FormatException catch (e) {
+      throw KeycloakServerException(400, e.message);
+    } on SocketException catch (e) {
+      throw KeycloakNetworkException(e);
+    } on http.ClientException catch (e) {
+      throw KeycloakNetworkException(e);
+    } on TimeoutException {
+      throw const KeycloakTimeoutException('Client-credentials grant timed out.');
+    }
   }
 
   UserInfo? get currentUser => _sessionManager.currentUser;
@@ -231,7 +290,9 @@ final class KeycloakClient {
             return;
           }
 
-          _tokenService.setClient(Client(stored.toOAuth2Credentials(_clientConfig.tokenEndpoint), identifier: _clientConfig.clientId));
+          _tokenService.setClient(
+            Client(stored.toOAuth2Credentials(_clientConfig.tokenEndpoint), identifier: _clientConfig.clientId, httpClient: _httpClient),
+          );
 
           if (stored.isAccessExpired) {
             _logger.info('Access token expired, refreshing on init.');
@@ -301,14 +362,18 @@ final class KeycloakClient {
   Future<void> _login() async {
     await waitForInitialization();
 
-    _logger.info('Initiating login flow via ${_loginStrategy.runtimeType}.');
+    _logger.info(_clientConfig.isServiceAccount
+        ? 'Initiating client-credentials grant.'
+        : 'Initiating login flow via ${_loginStrategy.runtimeType}.');
 
-    final client = await switch (_loginStrategy) {
-      final IDesktopLoginStrategy strategy => strategy.login(platformConfig: _desktopConfig, clientConfig: _clientConfig),
-      final IMobileLoginStrategy strategy => strategy.login(platformConfig: _mobileConfig, clientConfig: _clientConfig),
-      final IWebLoginStrategy strategy => strategy.login(platformConfig: _webConfig, clientConfig: _clientConfig),
-      _ => throw StateError('Unknown login strategy type: ${_loginStrategy.runtimeType}'),
-    };
+    final client = _clientConfig.isServiceAccount
+        ? await _serviceAccountLogin()
+        : await switch (_loginStrategy) {
+            final IDesktopLoginStrategy strategy => strategy.login(platformConfig: _desktopConfig, clientConfig: _clientConfig),
+            final IMobileLoginStrategy strategy => strategy.login(platformConfig: _mobileConfig, clientConfig: _clientConfig),
+            final IWebLoginStrategy strategy => strategy.login(platformConfig: _webConfig, clientConfig: _clientConfig),
+            _ => throw StateError('Unknown login strategy type: ${_loginStrategy.runtimeType}'),
+          };
 
     if (client == null) {
       _logger.warning('Login cancelled by user.');
@@ -323,7 +388,7 @@ final class KeycloakClient {
     _tokenService.setClient(client);
     final credentials = UserCredentials.fromOAuth2(
       client.credentials,
-      isOfflineToken: _clientConfig.isOfflineSession,
+      isOfflineToken: _noLocalRefreshExpiry,
       refreshTokenLifetime: _clientConfig.refreshTokenLifetime,
     );
     await _credentialsStorage.setCredentials(credentials);

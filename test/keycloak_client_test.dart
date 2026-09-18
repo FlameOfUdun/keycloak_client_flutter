@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:oauth2/oauth2.dart' as oauth2;
 import 'package:keycloak_client/keycloak_client.dart';
@@ -93,6 +97,54 @@ oauth2.Client _refreshedClient() => oauth2.Client(
     expiration: DateTime.now().add(const Duration(minutes: 5)),
     tokenEndpoint: Uri.parse('http://localhost/token'),
   ),
+);
+
+http.Response _json(Object body, [int status = 200]) =>
+    http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json'});
+
+/// Stands in for Keycloak's token and userinfo endpoints for the
+/// client-credentials grant. Tokens are numbered by request, so a test can
+/// tell a fresh grant from a cached token.
+final class FakeKeycloak {
+  final requests = <http.Request>[];
+  final tokenRequests = <http.Request>[];
+
+  /// When set, the token endpoint rejects the client with this OAuth error.
+  String? tokenError;
+
+  /// When set, the token endpoint throws this instead of answering.
+  Object? tokenThrows;
+
+  late final http.Client client = MockClient((request) async {
+    requests.add(request);
+    if (request.url.path.endsWith('/token')) {
+      tokenRequests.add(request);
+      if (tokenThrows != null) throw tokenThrows!;
+      if (tokenError != null) return _json({'error': tokenError}, 401);
+      return _json({'access_token': 'sa-token-${tokenRequests.length}', 'token_type': 'Bearer', 'expires_in': 300});
+    }
+    if (request.url.path.endsWith('/userinfo')) {
+      return _json({'sub': 'sa-1', 'preferred_username': 'service-account-backend'});
+    }
+    return http.Response('not found', 404);
+  });
+}
+
+ClientConfig _saConfig({String? secret = 's3cret'}) => ClientConfig(
+  baseUrl: 'http://localhost',
+  realm: 'test',
+  clientId: 'backend',
+  clientSecret: secret,
+  grantType: GrantType.clientCredentials,
+);
+
+/// A stored service-account token whose access token has already expired.
+UserCredentials _expiredSaCreds() => UserCredentials(
+  accessToken: 'sa-token-old',
+  refreshToken: '',
+  accessTokenExpiry: DateTime.now().subtract(const Duration(minutes: 1)),
+  refreshTokenExpiry: DateTime(9999),
+  isOfflineToken: true,
 );
 
 void main() {
@@ -383,6 +435,135 @@ void main() {
 
       expect(done, isTrue);
       await sub.cancel();
+    });
+  });
+
+  group('service account mode', () {
+    test('the constructor rejects a missing secret', () {
+      for (final secret in [null, '']) {
+        expect(
+          () => KeycloakClient.withDependencies(clientConfig: _saConfig(secret: secret), credentialsStorage: FakeStore()),
+          throwsArgumentError,
+          reason: 'secret: $secret',
+        );
+      }
+    });
+
+    test('login() runs the client-credentials grant and never opens a browser', () async {
+      final kc = FakeKeycloak();
+      final probe = LoginProbe();
+      final store = FakeStore();
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(),
+        credentialsStorage: store,
+        desktopLoginStrategy: SlowDesktopStrategy(probe),
+        mobileLoginStrategy: SlowMobileStrategy(probe),
+        httpClient: kc.client,
+      );
+
+      await client.login();
+
+      expect(probe.calls, 0, reason: 'a browser login strategy was used');
+      expect(kc.tokenRequests, hasLength(1));
+      final grant = kc.tokenRequests.single;
+      expect(grant.bodyFields['grant_type'], 'client_credentials');
+      expect(grant.headers['authorization'], 'Basic ${base64Encode(utf8.encode('backend:s3cret'))}');
+      expect(client.authState, AuthState.signedIn);
+      expect(client.currentUser?.username, 'service-account-backend');
+      expect(await client.getAuthToken(), 'sa-token-1');
+      // No refresh token, so no local expiry: initialize() must never call a
+      // service-account session expired.
+      expect(store.creds!.isOfflineToken, isTrue);
+      expect(store.creds!.isRefreshExpired, isFalse);
+
+      client.dispose();
+    });
+
+    test('an expired token is renewed with a new grant', () async {
+      final kc = FakeKeycloak();
+      final store = FakeStore();
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(),
+        credentialsStorage: store,
+        httpClient: kc.client,
+      );
+      await client.login();
+
+      store.creds = _expiredSaCreds();
+      final token = await client.getAuthToken();
+
+      expect(token, 'sa-token-2');
+      expect(kc.tokenRequests, hasLength(2));
+      expect(kc.tokenRequests.last.bodyFields['grant_type'], 'client_credentials');
+
+      client.dispose();
+    });
+
+    test('initialize() restores a stored session and renews its expired token', () async {
+      final kc = FakeKeycloak();
+      final store = FakeStore(creds: _expiredSaCreds(), user: const UserInfo(id: 'sa-1'));
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(),
+        credentialsStorage: store,
+        httpClient: kc.client,
+      );
+
+      await client.waitForInitialization();
+
+      expect(client.authState, AuthState.signedIn);
+      expect(kc.tokenRequests, hasLength(1));
+      expect(store.creds!.accessToken, 'sa-token-1');
+
+      client.dispose();
+    });
+
+    test('a rejected secret during renewal ends the session without retrying', () async {
+      final kc = FakeKeycloak();
+      final store = FakeStore();
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(),
+        credentialsStorage: store,
+        httpClient: kc.client,
+      );
+      await client.login();
+
+      kc.tokenError = 'invalid_client';
+      store.creds = _expiredSaCreds();
+      final token = await client.getAuthToken();
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      expect(token, isNull);
+      expect(client.authState, AuthState.sessionExpired);
+      expect(kc.tokenRequests, hasLength(2), reason: 'a retry was scheduled');
+
+      client.dispose();
+    });
+
+    test('login() maps a rejected secret to KeycloakServerException', () async {
+      final kc = FakeKeycloak()..tokenError = 'unauthorized_client';
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(),
+        credentialsStorage: FakeStore(),
+        httpClient: kc.client,
+      );
+
+      await expectLater(client.login(), throwsA(isA<KeycloakServerException>()));
+      expect(client.authState, AuthState.signedOut);
+
+      client.dispose();
+    });
+
+    test('login() maps a socket error to KeycloakNetworkException', () async {
+      final kc = FakeKeycloak()..tokenThrows = const SocketException('unreachable');
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(),
+        credentialsStorage: FakeStore(),
+        httpClient: kc.client,
+      );
+
+      await expectLater(client.login(), throwsA(isA<KeycloakNetworkException>()));
+
+      client.dispose();
     });
   });
 }
