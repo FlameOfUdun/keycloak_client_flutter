@@ -120,22 +120,19 @@ final class TokenService {
   Future<RefreshResult> _doRefresh() async {
     _logger.info('Attempting token refresh.');
 
-    try {
-      if (_oauthClient == null) {
-        await onPermanentFailure();
-        return const RefreshPermanentFailure();
-      }
+    final previous = _oauthClient;
+    if (previous == null) {
+      await onPermanentFailure();
+      return const RefreshPermanentFailure();
+    }
 
-      final previous = _oauthClient!;
+    try {
       final next = await _refreshOperation(previous, _scopes).timeout(_refreshTimeout);
-      if (!identical(_oauthClient, previous)) {
-        // Invalidated or replaced while the refresh was in flight: drop the
-        // result. The session has already ended, so onPermanentFailure is not
-        // called again. The identical() guards matter because the auth-code
-        // refresh returns the same instance it was given.
-        _logger.info('Session ended during refresh; discarding the result.');
+      if (_superseded(previous)) {
+        // The identical() guard matters because the auth-code refresh returns
+        // the same instance it was given.
         if (!identical(next, previous)) next.close();
-        return const RefreshPermanentFailure();
+        return _discarded();
       }
       // Closed only now that it has actually been replaced, so a refresh that
       // fails or is dropped never closes a client that is still in use.
@@ -165,10 +162,12 @@ final class TokenService {
       _logger.info('Token refresh successful.');
       return RefreshSuccess(credentials);
     } on oauth2.ExpirationException {
+      if (_superseded(previous)) return _discarded();
       _logger.warning('Session expired, re-authentication required.');
       await onPermanentFailure();
       return const RefreshPermanentFailure();
     } on oauth2.AuthorizationException catch (e, st) {
+      if (_superseded(previous)) return _discarded();
       // invalid_grant: the refresh token is revoked or expired. A service
       // account also lists invalid_client / unauthorized_client: its secret
       // was rotated or the client reconfigured, and no retry can fix that.
@@ -180,20 +179,40 @@ final class TokenService {
       _logger.severe('Authorization error during refresh, retrying in 30s.', e, st);
       return await _handleTransientFailure(e);
     } on SocketException catch (e, st) {
+      if (_superseded(previous)) return _discarded();
       _logger.warning('Network error during refresh, retrying in 30s.', e, st);
       return await _handleTransientFailure(e);
     } on http.ClientException catch (e, st) {
+      if (_superseded(previous)) return _discarded();
       _logger.warning('Network error during refresh, retrying in 30s.', e, st);
       return await _handleTransientFailure(e);
     } on FormatException catch (e, st) {
+      if (_superseded(previous)) return _discarded();
       // oauth2 reports a non-JSON token response, such as a proxy's 5xx page,
       // as a FormatException: a server hiccup, not a verdict on the session.
       _logger.warning('Malformed token response during refresh, retrying in 30s.', e, st);
       return await _handleTransientFailure(e);
     } on TimeoutException catch (e, st) {
+      if (_superseded(previous)) return _discarded();
       _logger.warning('Token refresh timed out, retrying in 30s.', e, st);
       return await _handleTransientFailure(e);
     }
+  }
+
+  /// Whether the session this refresh started from has since been ended
+  /// (invalidate) or replaced (setClient) while the refresh was in flight.
+  ///
+  /// Every outcome checks this first. Ending a session closes the client's
+  /// transport, so the refresh typically fails with a ClientException, and a
+  /// failure that belongs to a session already over must not end it a second
+  /// time: that would flip an explicit logout's signedOut to sessionExpired.
+  bool _superseded(oauth2.Client previous) => !identical(_oauthClient, previous);
+
+  /// The outcome of a superseded refresh: no store write, no retry, and no
+  /// onPermanentFailure, since whoever ended the session already handled it.
+  RefreshResult _discarded() {
+    _logger.info('Session ended during refresh; discarding the result.');
+    return const RefreshPermanentFailure();
   }
 
   Future<RefreshResult> _handleTransientFailure(Object cause) async {

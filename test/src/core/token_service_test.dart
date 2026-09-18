@@ -526,6 +526,40 @@ void main() {
     });
   });
 
+  group('refresh failing after invalidate()', () {
+    test('a transport error is dropped without ending the session again', () async {
+      late final TokenService service;
+      service = _makeService((_, _) async {
+        service.invalidate();
+        throw http.ClientException('closed');
+      });
+      service.setClient(oauthClient);
+
+      final result = await service.attemptRefresh();
+
+      expect(result, isA<RefreshPermanentFailure>());
+      expect(permanentCalls, 0);
+      verifyNever(() => store.getCredentials());
+      verifyNever(() => store.setCredentials(any()));
+      service.dispose();
+    });
+
+    test('a permanent auth error is dropped without ending the session again', () async {
+      late final TokenService service;
+      service = _makeService((_, _) async {
+        service.invalidate();
+        throw oauth2.AuthorizationException('invalid_grant', null, null);
+      });
+      service.setClient(oauthClient);
+
+      final result = await service.attemptRefresh();
+
+      expect(result, isA<RefreshPermanentFailure>());
+      expect(permanentCalls, 0);
+      service.dispose();
+    });
+  });
+
   group('transient failure — FormatException', () {
     test('returns RefreshTransientFailure and schedules a retry', () async {
       when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());

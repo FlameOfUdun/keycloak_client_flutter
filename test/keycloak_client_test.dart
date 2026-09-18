@@ -442,6 +442,45 @@ void main() {
     });
   });
 
+  group('logout during a refresh', () {
+    test('a refresh that fails after logout leaves the state signedOut', () async {
+      // Logging out closes the client's transport, so the in-flight refresh
+      // fails with a ClientException. That failure belongs to a session that
+      // has already ended and must not be reported as it expiring.
+      final release = Completer<void>();
+      var refreshStarted = false;
+      final store = FakeStore(creds: _creds(accessExpired: false), user: const UserInfo(id: 'u1'));
+      final client = KeycloakClient.withDependencies(
+        clientConfig: ClientConfig(baseUrl: 'http://localhost', realm: 'test', clientId: 'app'),
+        credentialsStorage: store,
+        httpClient: FakeKeycloak().client,
+        tokenRefreshOperation: (_, _) async {
+          refreshStarted = true;
+          await release.future;
+          throw http.ClientException('closed');
+        },
+      );
+      await client.waitForInitialization();
+      expect(client.authState, AuthState.signedIn);
+
+      store.creds = _creds(accessExpired: true);
+      final pending = client.getAuthToken();
+      for (var i = 0; i < 400 && !refreshStarted; i++) {
+        await Future.delayed(const Duration(milliseconds: 5));
+      }
+      expect(refreshStarted, isTrue);
+
+      await client.logout();
+      release.complete();
+      expect(await pending, isNull);
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(client.authState, AuthState.signedOut);
+
+      client.dispose();
+    });
+  });
+
   group('service account mode', () {
     test('the constructor rejects a missing secret', () {
       for (final secret in [null, '']) {
@@ -556,9 +595,10 @@ void main() {
       kc.holdToken = Completer<void>();
       store.creds = _expiredSaCreds();
       final pending = client.getAuthToken();
-      while (kc.tokenRequests.length < 2) {
+      for (var i = 0; i < 400 && kc.tokenRequests.length < 2; i++) {
         await Future.delayed(const Duration(milliseconds: 5));
       }
+      expect(kc.tokenRequests, hasLength(2));
 
       await client.logout();
       kc.holdToken!.complete();
