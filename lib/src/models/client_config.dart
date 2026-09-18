@@ -1,3 +1,5 @@
+import '../enums/grant_type.dart';
+
 /// Configuration for [KeycloakClient]. Contains all necessary information to
 /// interact with the Keycloak server and customize client behavior.
 final class ClientConfig {
@@ -35,6 +37,13 @@ final class ClientConfig {
   /// retried. Defaults to 15 seconds.
   final Duration refreshTimeout;
 
+  /// How tokens are obtained. Defaults to [GrantType.authorizationCode].
+  ///
+  /// [GrantType.clientCredentials] turns the client into a service account:
+  /// `login()` fetches a token with [clientId] and [clientSecret] and no
+  /// browser, and [clientSecret] becomes required.
+  final GrantType grantType;
+
   const ClientConfig({
     required this.baseUrl,
     required this.realm,
@@ -43,6 +52,7 @@ final class ClientConfig {
     this.scopes = const ['openid', 'email', 'profile'],
     this.refreshTokenLifetime = const Duration(days: 30),
     this.refreshTimeout = const Duration(seconds: 15),
+    this.grantType = GrantType.authorizationCode,
   });
 
   /// Whether this session requests a Keycloak offline token.
@@ -50,6 +60,9 @@ final class ClientConfig {
   /// The only signal available on the client: `package:oauth2` does not surface
   /// the `refresh_expires_in == 0` marker the server sends back.
   bool get isOfflineSession => scopes.contains('offline_access');
+
+  /// Whether this client authenticates as a service account.
+  bool get isServiceAccount => grantType == GrantType.clientCredentials;
 
   /// Constructs the standard Keycloak endpoints based on [baseUrl] and [realm].
   Uri get authorizationEndpoint => Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/auth');

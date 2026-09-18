@@ -24,6 +24,7 @@ import 'src/strategies/platform_login_strategy.dart';
 import 'src/utilities/secure_storage_auth_credentials_store.dart';
 
 export 'src/enums/auth_state.dart';
+export 'src/enums/grant_type.dart';
 export 'src/models/client_config.dart';
 export 'src/models/account_credential.dart';
 export 'src/models/keycloak_exception.dart';
