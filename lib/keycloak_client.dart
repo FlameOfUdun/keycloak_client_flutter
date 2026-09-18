@@ -30,6 +30,7 @@ export 'src/enums/grant_type.dart';
 export 'src/models/client_config.dart';
 export 'src/models/account_credential.dart';
 export 'src/models/keycloak_exception.dart';
+export 'src/models/keycloak_roles.dart';
 export 'src/models/user_credentials.dart';
 export 'src/models/user_info.dart';
 export 'src/models/platform_config.dart';
