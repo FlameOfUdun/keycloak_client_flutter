@@ -1,3 +1,9 @@
+/// PKCE and `state` generation for Authorization Code flows.
+///
+/// Exported for custom `ILoginStrategy` implementations, so they generate the
+/// verifier and state exactly as the built-in strategies do.
+library;
+
 import 'dart:math';
 
 /// The unreserved character set RFC 7636 §4.1 allows in a code verifier.

@@ -41,6 +41,12 @@ export 'src/interfaces/pending_grant_store.dart';
 // PendingGrant appears in IPendingGrantStore's signature, so anyone
 // implementing that interface needs to be able to name it.
 export 'src/models/pending_grant.dart';
+// The default store, so a consumer replacing one dependency is not forced to
+// re-implement this one (and its storage keys) as well.
+export 'src/utilities/secure_storage_auth_credentials_store.dart';
+// For custom login strategies, so verifier and state generation keep a
+// single definition.
+export 'src/utilities/pkce.dart';
 
 /// Keycloak client for handling authentication, token management, and user
 /// sessions across all platforms.
