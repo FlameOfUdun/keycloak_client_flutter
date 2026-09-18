@@ -115,10 +115,14 @@ final class FakeKeycloak {
   /// When set, the token endpoint throws this instead of answering.
   Object? tokenThrows;
 
+  /// When set, the token endpoint waits for this before answering.
+  Completer<void>? holdToken;
+
   late final http.Client client = MockClient((request) async {
     requests.add(request);
     if (request.url.path.endsWith('/token')) {
       tokenRequests.add(request);
+      if (holdToken != null) await holdToken!.future;
       if (tokenThrows != null) throw tokenThrows!;
       if (tokenError != null) return _json({'error': tokenError}, 401);
       return _json({'access_token': 'sa-token-${tokenRequests.length}', 'token_type': 'Bearer', 'expires_in': 300});
@@ -534,7 +538,36 @@ void main() {
 
       expect(token, isNull);
       expect(client.authState, AuthState.sessionExpired);
-      expect(kc.tokenRequests, hasLength(2), reason: 'a retry was scheduled');
+      expect(kc.tokenRequests, hasLength(2));
+
+      client.dispose();
+    });
+
+    test('a renewal that finishes after logout does not resurrect the session', () async {
+      final kc = FakeKeycloak();
+      final store = FakeStore();
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(),
+        credentialsStorage: store,
+        httpClient: kc.client,
+      );
+      await client.login();
+
+      kc.holdToken = Completer<void>();
+      store.creds = _expiredSaCreds();
+      final pending = client.getAuthToken();
+      while (kc.tokenRequests.length < 2) {
+        await Future.delayed(const Duration(milliseconds: 5));
+      }
+
+      await client.logout();
+      kc.holdToken!.complete();
+      await pending;
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(store.creds, isNull);
+      expect(client.authState, AuthState.signedOut);
+      expect(await client.getAuthToken(), isNull);
 
       client.dispose();
     });

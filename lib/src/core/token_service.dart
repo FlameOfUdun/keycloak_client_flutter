@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
 import 'package:oauth2/oauth2.dart' as oauth2;
 
@@ -125,7 +126,21 @@ final class TokenService {
         return const RefreshPermanentFailure();
       }
 
-      _oauthClient = await _refreshOperation(_oauthClient!, _scopes).timeout(_refreshTimeout);
+      final previous = _oauthClient!;
+      final next = await _refreshOperation(previous, _scopes).timeout(_refreshTimeout);
+      if (!identical(_oauthClient, previous)) {
+        // Invalidated or replaced while the refresh was in flight: drop the
+        // result. The session has already ended, so onPermanentFailure is not
+        // called again. The identical() guards matter because the auth-code
+        // refresh returns the same instance it was given.
+        _logger.info('Session ended during refresh; discarding the result.');
+        if (!identical(next, previous)) next.close();
+        return const RefreshPermanentFailure();
+      }
+      // Closed only now that it has actually been replaced, so a refresh that
+      // fails or is dropped never closes a client that is still in use.
+      if (!identical(next, previous)) previous.close();
+      _oauthClient = next;
       // Both flags have to be re-supplied on every refresh: oauth2.Credentials
       // carries neither, so omitting them would quietly downgrade an offline
       // session to a 30-day one on its first refresh.
@@ -166,6 +181,14 @@ final class TokenService {
       return await _handleTransientFailure(e);
     } on SocketException catch (e, st) {
       _logger.warning('Network error during refresh, retrying in 30s.', e, st);
+      return await _handleTransientFailure(e);
+    } on http.ClientException catch (e, st) {
+      _logger.warning('Network error during refresh, retrying in 30s.', e, st);
+      return await _handleTransientFailure(e);
+    } on FormatException catch (e, st) {
+      // oauth2 reports a non-JSON token response, such as a proxy's 5xx page,
+      // as a FormatException: a server hiccup, not a verdict on the session.
+      _logger.warning('Malformed token response during refresh, retrying in 30s.', e, st);
       return await _handleTransientFailure(e);
     } on TimeoutException catch (e, st) {
       _logger.warning('Token refresh timed out, retrying in 30s.', e, st);

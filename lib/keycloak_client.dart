@@ -56,6 +56,9 @@ final class KeycloakClient {
 
   /// Transport for the client-credentials grant. Null in production, where
   /// each grant opens its own connection; tests inject a fake.
+  ///
+  /// An injected client is shared by every grant and must tolerate `close()`
+  /// being called on it: closing an oauth2.Client closes its transport.
   final http.Client? _httpClient;
   final _logger = Logger('KeycloakClient');
 
@@ -152,21 +155,28 @@ final class KeycloakClient {
   /// valid until it is rotated.
   bool get _noLocalRefreshExpiry => _clientConfig.isOfflineSession || _clientConfig.isServiceAccount;
 
-  Future<Client> _clientCredentialsGrant() => clientCredentialsGrant(
-    _clientConfig.tokenEndpoint,
-    _clientConfig.clientId,
-    _clientConfig.clientSecret,
-    scopes: _clientConfig.scopes,
-    httpClient: _httpClient,
-  );
+  Future<Client> _clientCredentialsGrant() async {
+    // Created here rather than by oauth2 so it can be closed when the grant
+    // fails; on success the returned Client owns it.
+    final transport = _httpClient ?? http.Client();
+    try {
+      return await clientCredentialsGrant(
+        _clientConfig.tokenEndpoint,
+        _clientConfig.clientId,
+        _clientConfig.clientSecret,
+        scopes: _clientConfig.scopes,
+        httpClient: transport,
+      );
+    } catch (_) {
+      if (_httpClient == null) transport.close();
+      rethrow;
+    }
+  }
 
   /// The service-account "refresh": there is no refresh token, so a new grant
-  /// replaces the old client, which is then closed to free its connection.
-  Future<Client> _renewServiceAccountToken(Client current, List<String> _) async {
-    final next = await _clientCredentialsGrant();
-    current.close();
-    return next;
-  }
+  /// replaces the old client. TokenService closes the old one once it has
+  /// switched over.
+  Future<Client> _renewServiceAccountToken(Client current, List<String> _) => _clientCredentialsGrant();
 
   /// Runs the client-credentials grant for [login], mapping failures onto the
   /// same exceptions the browser strategies throw.

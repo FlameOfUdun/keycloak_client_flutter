@@ -500,6 +500,50 @@ void main() {
     });
   });
 
+  group('refresh finishing after invalidate()', () {
+    test('is dropped without storing or ending the session again', () async {
+      final release = Completer<void>();
+      final next = MockOAuth2Client();
+      when(() => next.credentials).thenReturn(_oauth2Creds(_validCreds()));
+      when(() => store.setCredentials(any())).thenAnswer((_) async {});
+
+      final service = _makeService((_, _) async {
+        await release.future;
+        return next;
+      });
+      service.setClient(oauthClient);
+
+      final pending = service.attemptRefresh();
+      service.invalidate();
+      release.complete();
+      final result = await pending;
+
+      expect(result, isA<RefreshPermanentFailure>());
+      verifyNever(() => store.setCredentials(any()));
+      expect(permanentCalls, 0);
+      verify(() => next.close()).called(1);
+      service.dispose();
+    });
+  });
+
+  group('transient failure — FormatException', () {
+    test('returns RefreshTransientFailure and schedules a retry', () async {
+      when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
+      final service = _makeService(
+        (_, _) async => throw const FormatException('bad 502 body'),
+      );
+      service.setClient(oauthClient);
+
+      final result = await service.attemptRefresh();
+
+      expect(result, isA<RefreshTransientFailure>());
+      expect(permanentCalls, 0);
+      // The retry path reads the store to decide whether to reschedule.
+      verify(() => store.getCredentials()).called(1);
+      service.dispose();
+    });
+  });
+
   group('permanentAuthErrors', () {
     test('by default invalid_client is transient', () async {
       when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
