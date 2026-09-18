@@ -64,6 +64,7 @@ void main() {
     Duration refreshTimeout = const Duration(seconds: 15),
     Duration refreshTokenLifetime = const Duration(days: 30),
     bool isOfflineSession = false,
+    Set<String>? permanentAuthErrors,
   }) {
     return TokenService(
       store: store,
@@ -76,6 +77,7 @@ void main() {
       logger: logger,
       refreshOperation: refreshOp,
       refreshTimeout: refreshTimeout,
+      permanentAuthErrors: permanentAuthErrors,
     );
   }
 
@@ -495,6 +497,36 @@ void main() {
       final body = await capturePostBody('test-id-token');
 
       expect(body, containsPair('id_token_hint', 'test-id-token'));
+    });
+  });
+
+  group('permanentAuthErrors', () {
+    test('by default invalid_client is transient', () async {
+      when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
+      final service = _makeService(
+        (_, __) async => throw oauth2.AuthorizationException('invalid_client', null, null),
+      );
+      service.setClient(oauthClient);
+
+      final result = await service.attemptRefresh();
+
+      expect(result, isA<RefreshTransientFailure>());
+      expect(permanentCalls, 0);
+      service.dispose();
+    });
+
+    test('a listed error ends the session without retrying', () async {
+      final service = _makeService(
+        (_, __) async => throw oauth2.AuthorizationException('invalid_client', null, null),
+        permanentAuthErrors: const {'invalid_grant', 'invalid_client'},
+      );
+      service.setClient(oauthClient);
+
+      final result = await service.attemptRefresh();
+
+      expect(result, isA<RefreshPermanentFailure>());
+      expect(permanentCalls, 1);
+      service.dispose();
     });
   });
 }

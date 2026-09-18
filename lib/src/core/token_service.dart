@@ -23,6 +23,7 @@ final class TokenService {
   final Duration _refreshTimeout;
   final Duration _refreshTokenLifetime;
   final bool _isOfflineSession;
+  final Set<String> _permanentAuthErrors;
 
   /// Called (and awaited) when the session is permanently invalid.
   final Future<void> Function() onPermanentFailure;
@@ -51,6 +52,7 @@ final class TokenService {
     Duration refreshTimeout = const Duration(seconds: 15),
     Duration refreshTokenLifetime = const Duration(days: 30),
     bool isOfflineSession = false,
+    Set<String>? permanentAuthErrors,
     RefreshOperation? refreshOperation,
   }) : _store = store,
        _scopes = scopes,
@@ -58,6 +60,7 @@ final class TokenService {
        _refreshTimeout = refreshTimeout,
        _refreshTokenLifetime = refreshTokenLifetime,
        _isOfflineSession = isOfflineSession,
+       _permanentAuthErrors = permanentAuthErrors ?? const {'invalid_grant'},
        _refreshOperation = refreshOperation ?? ((client, scopes) => client.refreshCredentials(scopes));
 
   /// Exposes the active OAuth2 client for direct HTTP calls (userinfo, logout).
@@ -151,8 +154,11 @@ final class TokenService {
       await onPermanentFailure();
       return const RefreshPermanentFailure();
     } on oauth2.AuthorizationException catch (e, st) {
-      if (e.error == 'invalid_grant') {
-        _logger.warning('Refresh token revoked or expired (invalid_grant).');
+      // invalid_grant: the refresh token is revoked or expired. A service
+      // account also lists invalid_client / unauthorized_client: its secret
+      // was rotated or the client reconfigured, and no retry can fix that.
+      if (_permanentAuthErrors.contains(e.error)) {
+        _logger.warning('Refresh rejected permanently (${e.error}).');
         await onPermanentFailure();
         return const RefreshPermanentFailure();
       }
