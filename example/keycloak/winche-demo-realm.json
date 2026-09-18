@@ -1,0 +1,84 @@
+{
+  "realm": "winche-demo",
+  "enabled": true,
+  "displayName": "Winche demo",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "staff",
+        "description": "Staff members. The example app can require this role with KC_REQUIRED_REALM_ROLE=staff."
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "flutter-app",
+      "name": "Flutter example app",
+      "description": "Public client for the example app's browser login (authorization code + PKCE).",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8765/callback",
+        "http://localhost:8765/*"
+      ],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      }
+    },
+    {
+      "clientId": "backend-sa",
+      "name": "Backend service account",
+      "description": "Confidential client for the example app's service-account mode (client credentials).",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "backend-sa-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "username": "staffer",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Sam",
+      "lastName": "Staffer",
+      "email": "staffer@example.com",
+      "credentials": [
+        { "type": "password", "value": "password123", "temporary": false }
+      ],
+      "realmRoles": ["default-roles-winche-demo", "staff"]
+    },
+    {
+      "username": "outsider",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Olive",
+      "lastName": "Outsider",
+      "email": "outsider@example.com",
+      "credentials": [
+        { "type": "password", "value": "password123", "temporary": false }
+      ],
+      "realmRoles": ["default-roles-winche-demo"]
+    },
+    {
+      "username": "service-account-backend-sa",
+      "enabled": true,
+      "serviceAccountClientId": "backend-sa",
+      "realmRoles": ["default-roles-winche-demo", "staff"]
+    }
+  ]
+}

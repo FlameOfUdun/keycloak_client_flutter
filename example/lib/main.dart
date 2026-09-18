@@ -4,14 +4,32 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:keycloak_client/keycloak_client.dart';
 
+part 'home.dart';
+
 // Supplied with --dart-define so this file can be run against a real server
 // without editing it:
 //
 //   flutter run -d windows \
 //     --dart-define=KC_BASE_URL=http://localhost:8080 \
-//     --dart-define=KC_REALM=winche-test \
+//     --dart-define=KC_REALM=winche-demo \
 //     --dart-define=KC_CLIENT_ID=flutter-app \
 //     --dart-define=KC_DESKTOP_REDIRECT=http://localhost:8765/callback
+//
+// Optional:
+//
+//   --dart-define=KC_REQUIRED_REALM_ROLE=staff
+//       Admit only principals holding this realm role. Others are turned away
+//       at login (KeycloakAccessDeniedException) or, for a restored or
+//       refreshed session, land on the access-denied screen.
+//   --dart-define=KC_SERVICE_ACCOUNT=true
+//   --dart-define=KC_CLIENT_SECRET=backend-sa-secret
+//       Sign in as the client's own service account (client-credentials
+//       grant, no browser). KC_CLIENT_ID must then name a confidential client
+//       with service accounts enabled. KC_CLIENT_SECRET is also passed to a
+//       confidential client in browser-login mode.
+//
+// See example/README.md for a local Keycloak with a realm set up for all of
+// these.
 const _baseUrl = String.fromEnvironment(
   'KC_BASE_URL',
   defaultValue: 'your-keycloak-server',
@@ -21,6 +39,9 @@ const _clientId = String.fromEnvironment(
   'KC_CLIENT_ID',
   defaultValue: 'your-client-id',
 );
+const _clientSecret = String.fromEnvironment('KC_CLIENT_SECRET');
+const _serviceAccount = bool.fromEnvironment('KC_SERVICE_ACCOUNT');
+const _requiredRealmRole = String.fromEnvironment('KC_REQUIRED_REALM_ROLE');
 
 /// Where Keycloak sends the browser back to.
 ///
@@ -36,11 +57,20 @@ const _webRedirect = String.fromEnvironment(
   defaultValue: 'https://winchetechnologies.co.uk/tools/oauth_redirect',
 );
 
+/// The KeycloakClient constructor rejects a service account without a secret;
+/// checked up front so the app can say so instead of failing to start.
+const _missingSecret = _serviceAccount && _clientSecret == '';
+
 final client = KeycloakClient(
   clientConfig: ClientConfig(
     baseUrl: _baseUrl,
     realm: _realm,
     clientId: _clientId,
+    clientSecret: _clientSecret == '' ? null : _clientSecret,
+    grantType: _serviceAccount
+        ? GrantType.clientCredentials
+        : GrantType.authorizationCode,
+    requiredRealmRoles: {if (_requiredRealmRole != '') _requiredRealmRole},
     refreshTimeout: const Duration(seconds: 3),
   ),
   desktopConfig: const DesktopConfig(redirectUri: _desktopRedirect),
@@ -50,8 +80,14 @@ final client = KeycloakClient(
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  if (_missingSecret) {
+    runApp(const _ConfigErrorApp());
+    return;
+  }
+
   // Web only: resolve any in-progress OAuth callback before the app renders.
-  if (kIsWeb) {
+  // A service account has no redirect flow (handleWebCallback would throw).
+  if (kIsWeb && !_serviceAccount) {
     try {
       final resumed = await client.handleWebCallback(Uri.base);
       if (resumed) {
@@ -63,6 +99,27 @@ void main() async {
   }
 
   runApp(const _Application());
+}
+
+final class _ConfigErrorApp extends StatelessWidget {
+  const _ConfigErrorApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Keycloak Example',
+      theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
+      home: const Scaffold(
+        body: Center(
+          child: _ErrorTile(
+            message:
+                'KC_SERVICE_ACCOUNT=true needs the client secret: pass '
+                '--dart-define=KC_CLIENT_SECRET=...',
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 final class _Application extends StatefulWidget {
@@ -111,7 +168,7 @@ final class _AuthGate extends StatelessWidget {
           AuthState.signedIn => _HomeScreen(client: client),
           AuthState.signedOut => _LoginScreen(client: client),
           AuthState.sessionExpired => _SessionExpiredScreen(client: client),
-          AuthState.accessDenied => _LoginScreen(client: client),
+          AuthState.accessDenied => _AccessDeniedScreen(client: client),
         };
       },
     );
@@ -125,6 +182,45 @@ final class _LoadingScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
+}
+
+/// Shows which way this build signs in, so a screenshot or a tester can tell
+/// the two modes apart at a glance.
+final class _ModeChip extends StatelessWidget {
+  const _ModeChip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(
+      visualDensity: VisualDensity.compact,
+      avatar: Icon(
+        _serviceAccount ? Icons.smart_toy_outlined : Icons.open_in_browser,
+        size: 18,
+      ),
+      label: Text(_serviceAccount ? 'Service account' : 'Browser login'),
+    );
+  }
+}
+
+/// "realm: staff; my-client: editor" — for the roles a
+/// [KeycloakAccessDeniedException] reports as missing.
+String _describeRoles(KeycloakRoles roles) {
+  return [
+    if (roles.realm.isNotEmpty) 'realm: ${roles.realm.join(', ')}',
+    for (final MapEntry(:key, :value) in roles.client.entries)
+      if (value.isNotEmpty) '$key: ${value.join(', ')}',
+  ].join('; ');
+}
+
+/// Shows [message] as an error snackbar on [messenger].
+///
+/// Takes the messenger rather than a context because the caller has often
+/// been unmounted by the time it has something to report: a denied login
+/// or refresh changes the auth state, which swaps the screen it lived on.
+void _showError(ScaffoldMessengerState messenger, Color color, String message) {
+  messenger.showSnackBar(
+    SnackBar(content: Text(message), backgroundColor: color),
+  );
 }
 
 /// A sign-in button that reports what it is doing.
@@ -146,17 +242,21 @@ final class _SignInButtonState extends State<_SignInButton> {
   bool _busy = false;
 
   Future<void> _signIn() async {
+    // Captured up front: a denied login moves the app to signedOut, which may
+    // replace the screen this button is on before the error arrives.
+    final messenger = ScaffoldMessenger.of(context);
+    final errorColor = Theme.of(context).colorScheme.error;
     setState(() => _busy = true);
     try {
       await widget.client.login();
-    } on Exception catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Sign-in failed: $e'),
-          backgroundColor: Theme.of(context).colorScheme.error,
-        ),
+    } on KeycloakAccessDeniedException catch (e) {
+      _showError(
+        messenger,
+        errorColor,
+        'Access denied — missing roles: ${_describeRoles(e.missing)}',
       );
+    } on Exception catch (e) {
+      _showError(messenger, errorColor, 'Sign-in failed: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -176,15 +276,32 @@ final class _SignInButtonState extends State<_SignInButton> {
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Icon(Icons.login),
+              : Icon(_serviceAccount ? Icons.smart_toy_outlined : Icons.login),
           label: Text(widget.label),
         ),
         if (_busy)
           Text(
-            'Waiting for you to finish in the browser…',
+            _serviceAccount
+                ? 'Requesting a token…'
+                : 'Waiting for you to finish in the browser…',
             style: Theme.of(context).textTheme.bodySmall,
           ),
       ],
+    );
+  }
+}
+
+/// Mentions the required role, when one is configured, under a sign-in
+/// prompt.
+final class _RequiredRoleHint extends StatelessWidget {
+  const _RequiredRoleHint();
+
+  @override
+  Widget build(BuildContext context) {
+    if (_requiredRealmRole == '') return const SizedBox.shrink();
+    return Text(
+      'Requires realm role "$_requiredRealmRole"',
+      style: Theme.of(context).textTheme.bodySmall,
     );
   }
 }
@@ -206,7 +323,14 @@ final class _LoginScreen extends StatelessWidget {
               'Sign in to continue',
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            _SignInButton(client: client, label: 'Sign in with Keycloak'),
+            const _ModeChip(),
+            _SignInButton(
+              client: client,
+              label: _serviceAccount
+                  ? 'Sign in as service account'
+                  : 'Sign in with Keycloak',
+            ),
+            const _RequiredRoleHint(),
           ],
         ),
       ),
@@ -244,320 +368,58 @@ final class _SessionExpiredScreen extends StatelessWidget {
   }
 }
 
-final class _HomeScreen extends StatelessWidget {
+/// [AuthState.accessDenied]: a restored or refreshed session turned out to
+/// lack a required role, so the client ended it.
+///
+/// A login without the role never gets here — [KeycloakClient.login] throws
+/// instead and the app stays signed out; [_SignInButton] reports that.
+final class _AccessDeniedScreen extends StatelessWidget {
   final KeycloakClient client;
-  const _HomeScreen({required this.client});
+  const _AccessDeniedScreen({required this.client});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Home'),
-        actions: [
-          IconButton(
-            tooltip: 'Manage account',
-            icon: const Icon(Icons.manage_accounts),
-            onPressed: client.manageAccount,
-          ),
-          IconButton(
-            tooltip: 'Sign out',
-            icon: const Icon(Icons.logout),
-            onPressed: client.logout,
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _UserInfoCard(client: client),
-                _TokenRotationCard(client: client),
-                _CredentialsCard(client: client),
-                const SizedBox(height: 24),
-              ],
-            ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            spacing: 16,
+            children: [
+              Icon(
+                Icons.gpp_bad_outlined,
+                size: 64,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              Text(
+                'Access denied',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              Text(
+                _requiredRealmRole == ''
+                    ? 'This account no longer holds a role this app requires, '
+                          'so you have been signed out.'
+                    : 'This account does not hold the realm role '
+                          '"$_requiredRealmRole" this app requires, so you '
+                          'have been signed out.',
+                textAlign: TextAlign.center,
+              ),
+              const Text(
+                'Sign in with an account that has it, or ask an administrator '
+                'to grant it.',
+                textAlign: TextAlign.center,
+              ),
+              _SignInButton(
+                client: client,
+                label: _serviceAccount
+                    ? 'Sign in as service account again'
+                    : 'Sign in again',
+              ),
+            ],
           ),
         ),
       ),
-    );
-  }
-}
-
-final class _UserInfoCard extends StatelessWidget {
-  final KeycloakClient client;
-  const _UserInfoCard({required this.client});
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<UserInfo?>(
-      stream: client.onUserChange,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const CircularProgressIndicator();
-        }
-
-        if (snapshot.hasError) {
-          return _ErrorTile(message: '${snapshot.error}');
-        }
-
-        final user = snapshot.data;
-        if (user == null) {
-          return const Text('No user information available.');
-        }
-
-        return Card(
-          margin: const EdgeInsets.all(24),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              spacing: 8,
-              children: [
-                CircleAvatar(
-                  radius: 32,
-                  child: Text(
-                    (user.username ?? user.email ?? '?')[0].toUpperCase(),
-                    style: const TextStyle(fontSize: 28),
-                  ),
-                ),
-                if (user.username != null)
-                  Text(
-                    user.username!,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                if (user.email != null)
-                  Text(
-                    user.email!,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
-                  ),
-                const Divider(),
-                _InfoRow(label: 'ID', value: user.id),
-                if (user.givenName != null)
-                  _InfoRow(label: 'First name', value: user.givenName!),
-                if (user.familyName != null)
-                  _InfoRow(label: 'Last name', value: user.familyName!),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// Watches [KeycloakClient.onTokenRefreshed].
-///
-/// A connection authenticated once at dial time would use this to re-dial
-/// before the token it holds expires; here it just counts, so a refresh is
-/// visible without waiting for something to break.
-final class _TokenRotationCard extends StatefulWidget {
-  final KeycloakClient client;
-  const _TokenRotationCard({required this.client});
-
-  @override
-  State<_TokenRotationCard> createState() => _TokenRotationCardState();
-}
-
-final class _TokenRotationCardState extends State<_TokenRotationCard> {
-  StreamSubscription<void>? _sub;
-  int _rotations = 0;
-  DateTime? _lastAt;
-  String? _tokenTail;
-
-  @override
-  void initState() {
-    super.initState();
-    _sub = widget.client.onTokenRefreshed.listen((_) async {
-      final token = await widget.client.getAuthToken();
-      if (!mounted) return;
-      setState(() {
-        _rotations++;
-        _lastAt = DateTime.now();
-        _tokenTail = token == null
-            ? null
-            : '…${token.substring(token.length - 8)}';
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 24),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          spacing: 4,
-          children: [
-            Text(
-              'Token rotation',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            _InfoRow(label: 'Refreshes seen', value: '$_rotations'),
-            _InfoRow(
-              label: 'Last at',
-              value: _lastAt == null
-                  ? 'not yet'
-                  : TimeOfDay.fromDateTime(_lastAt!).format(context),
-            ),
-            _InfoRow(label: 'Access token', value: _tokenTail ?? '—'),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-final class _CredentialsCard extends StatefulWidget {
-  final KeycloakClient client;
-  const _CredentialsCard({required this.client});
-
-  @override
-  State<_CredentialsCard> createState() => _CredentialsCardState();
-}
-
-final class _CredentialsCardState extends State<_CredentialsCard> {
-  late Future<List<AccountCredential>> _future =
-      widget.client.getAccountCredentials();
-
-  void _refresh() {
-    setState(() {
-      _future = widget.client.getAccountCredentials();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 24),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Authentication methods',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                IconButton(
-                  tooltip: 'Refresh',
-                  icon: const Icon(Icons.refresh, size: 20),
-                  onPressed: _refresh,
-                ),
-              ],
-            ),
-            FutureBuilder<List<AccountCredential>>(
-              future: _future,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                if (snapshot.hasError) {
-                  return _ErrorTile(message: '${snapshot.error}');
-                }
-                final credentials = snapshot.data ?? const [];
-                if (credentials.isEmpty) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text('No credentials configured.'),
-                  );
-                }
-                return Column(
-                  children: credentials.map(_credentialTile).toList(),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _credentialTile(AccountCredential credential) {
-    // Pattern match on the sealed family for type-specific rendering.
-    final (IconData icon, String subtitle) = switch (credential) {
-      PasswordCredential() => (
-        Icons.password,
-        credential.isConfigured ? 'Configured' : 'Not configured',
-      ),
-      OtpCredential(:final instances) => (
-        Icons.security,
-        instances.isEmpty
-            ? 'Not configured'
-            : instances
-                  .map((i) => '${i.userLabel ?? 'OTP'} · ${i.subType.name}')
-                  .join(', '),
-      ),
-      WebAuthnCredential(:final instances) => (
-        Icons.fingerprint,
-        instances.isEmpty
-            ? 'Not configured'
-            : instances.map((i) => i.userLabel ?? 'Authenticator').join(', '),
-      ),
-      UnknownCredential() => (
-        Icons.help_outline,
-        '${credential.instanceCount} configured',
-      ),
-    };
-
-    return ListTile(
-      dense: true,
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon),
-      title: Text(credential.displayName ?? credential.type),
-      subtitle: Text(subtitle),
-      trailing: credential.isConfigured
-          ? const Icon(Icons.check_circle, color: Colors.green, size: 18)
-          : const Icon(Icons.radio_button_unchecked, size: 18),
-    );
-  }
-}
-
-final class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-  const _InfoRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-        Text(value),
-      ],
-    );
-  }
-}
-
-final class _ErrorTile extends StatelessWidget {
-  final String message;
-  const _ErrorTile({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: const Icon(Icons.error_outline, color: Colors.red),
-      title: const Text('Something went wrong'),
-      subtitle: Text(message),
     );
   }
 }
