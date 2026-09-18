@@ -17,6 +17,7 @@ import 'src/enums/refresh_result.dart';
 import 'src/interfaces/auth_credentials_store.dart';
 import 'src/models/client_config.dart';
 import 'src/models/keycloak_exception.dart';
+import 'src/models/keycloak_roles.dart';
 import 'src/models/platform_config.dart';
 import 'src/models/account_credential.dart';
 import 'src/models/user_credentials.dart';
@@ -69,6 +70,7 @@ final class KeycloakClient {
   Future<void>? _loginInFlight;
   bool _initialized = false;
   bool _disposed = false;
+  KeycloakRoles? _roles;
 
   /// Creates a [KeycloakClient] from a single configuration object.
   KeycloakClient({required ClientConfig clientConfig, WebConfig? webConfig, MobileConfig? mobileConfig, DesktopConfig? desktopConfig})
@@ -200,6 +202,11 @@ final class KeycloakClient {
   UserInfo? get currentUser => _sessionManager.currentUser;
   AuthState get authState => _sessionManager.authState;
 
+  /// The principal's Keycloak roles, from the current access token. `null`
+  /// while no session exists. Updated on every refresh; listen to
+  /// [onTokenRefreshed] to react to changes.
+  KeycloakRoles? get roles => _roles;
+
   /// Emits the current [UserInfo] immediately on listen, then on every change.
   Stream<UserInfo?> get onUserChange => _bufferedStream(_sessionManager.userStream, () => currentUser);
 
@@ -227,6 +234,11 @@ final class KeycloakClient {
 
   void _handleTokenRefreshed() {
     if (!_sessionManager.authState.isSignedIn) return;
+    final token = _tokenService.oauthClient?.credentials.accessToken;
+    if (token != null && _checkRoles(token) != null) {
+      _denyAccess(AuthState.accessDenied).ignore();
+      return;
+    }
     if (_tokenRefreshed.isClosed) return;
     _tokenRefreshed.add(null);
   }
@@ -309,6 +321,12 @@ final class KeycloakClient {
             _logger.info('Access token expired, refreshing on init.');
             final result = await _tokenService.attemptRefresh();
             if (result is RefreshPermanentFailure) return;
+            // Offline start: judge the stored token, as the restore below does.
+            final token = result is RefreshSuccess ? result.credentials.accessToken : stored.accessToken;
+            if (_checkRoles(token) != null) {
+              await _denyAccess(AuthState.accessDenied);
+              return;
+            }
             // Offline-first: start the session with the cached user profile so the
             // app is usable immediately; _reloadUser() will patch it up on recovery.
             _sessionManager.beginSession(user);
@@ -317,6 +335,10 @@ final class KeycloakClient {
             // Note: TokenService._handleTransientFailure already called scheduleRefresh.
             if (result is RefreshSuccess) _reloadUser().ignore();
           } else {
+            if (_checkRoles(stored.accessToken) != null) {
+              await _denyAccess(AuthState.accessDenied);
+              return;
+            }
             _sessionManager.beginSession(user);
             _tokenService.scheduleRefresh(stored);
             _reloadUser().ignore();
@@ -403,6 +425,13 @@ final class KeycloakClient {
       refreshTokenLifetime: _clientConfig.refreshTokenLifetime,
     );
     await _credentialsStorage.setCredentials(credentials);
+    final missing = _checkRoles(credentials.accessToken);
+    if (missing != null) {
+      // signedOut, not accessDenied: the caller gets the exception, and the
+      // app never entered a session to be denied from.
+      await _denyAccess(AuthState.signedOut);
+      throw KeycloakAccessDeniedException(missing);
+    }
     final user = await _reloadUser();
     if (user == null) {
       throw KeycloakServerException(0, 'Could not load user after login');
@@ -511,25 +540,50 @@ final class KeycloakClient {
     _assertNotDisposed();
     _logger.info('Logging out: ${currentUser?.id ?? 'unknown'}');
 
-    final stored = await _credentialsStorage.getCredentials();
-    // A service account has no refresh token and no browser session to end.
-    if (stored != null && !_clientConfig.isServiceAccount) {
-      await _tokenService.revokeSession(
-        logoutEndpoint: _clientConfig.logoutEndpoint,
-        clientId: _clientConfig.clientId,
-        refreshToken: stored.refreshToken,
-        idToken: stored.idToken,
-      );
-    }
+    await _revokeServerSession();
 
     await _endSession(AuthState.signedOut);
     _logger.info('User logged out.');
   }
 
   Future<void> _endSession(AuthState reason) async {
+    _roles = null;
     _tokenService.invalidate();
     await _credentialsStorage.clear();
     _sessionManager.endSession(reason);
+  }
+
+  /// Checks [accessToken] against the required roles. Returns the missing ones,
+  /// or `null` when all are held, in which case the token's roles become [roles].
+  KeycloakRoles? _checkRoles(String accessToken) {
+    final granted = KeycloakRoles.fromAccessToken(accessToken);
+    final missing = _clientConfig.missingRoles(granted);
+    if (!missing.isEmpty) {
+      _logger.warning('Required roles missing: $missing');
+      return missing;
+    }
+    _roles = granted;
+    return null;
+  }
+
+  /// Revokes the stored session at Keycloak. A service account has no refresh
+  /// token and no browser session, so there is nothing to revoke.
+  Future<void> _revokeServerSession() async {
+    if (_clientConfig.isServiceAccount) return;
+    final stored = await _credentialsStorage.getCredentials();
+    if (stored == null) return;
+    await _tokenService.revokeSession(
+      logoutEndpoint: _clientConfig.logoutEndpoint,
+      clientId: _clientConfig.clientId,
+      refreshToken: stored.refreshToken,
+      idToken: stored.idToken,
+    );
+  }
+
+  /// Ends the session at Keycloak and locally, landing in [reason].
+  Future<void> _denyAccess(AuthState reason) async {
+    await _revokeServerSession();
+    await _endSession(reason);
   }
 
   /// Fetches the latest user profile from the Keycloak userinfo endpoint.
@@ -552,7 +606,9 @@ final class KeycloakClient {
     await waitForInitialization();
     final result = await _tokenService.attemptRefresh();
     switch (result) {
-      case RefreshSuccess():
+      case RefreshSuccess(:final credentials):
+        final missing = _clientConfig.missingRoles(KeycloakRoles.fromAccessToken(credentials.accessToken));
+        if (!missing.isEmpty) throw KeycloakAccessDeniedException(missing);
         _reloadUser().ignore();
       case RefreshTransientFailure(:final cause):
         throw KeycloakNetworkException(cause);
@@ -601,7 +657,11 @@ final class KeycloakClient {
 
     final result = await _tokenService.attemptRefresh();
     return switch (result) {
-      RefreshSuccess(:final credentials) => credentials.accessToken,
+      // The refresh handler has already started ending the session if a role
+      // was lost; don't hand the caller a token for it in the meantime.
+      RefreshSuccess(:final credentials) => _clientConfig.missingRoles(KeycloakRoles.fromAccessToken(credentials.accessToken)).isEmpty
+          ? credentials.accessToken
+          : null,
       RefreshTransientFailure(:final cause) => throw KeycloakNetworkException(cause),
       RefreshPermanentFailure() => null,
     };

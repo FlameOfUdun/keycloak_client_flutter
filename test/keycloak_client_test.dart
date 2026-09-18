@@ -151,6 +151,50 @@ UserCredentials _expiredSaCreds() => UserCredentials(
   isOfflineToken: true,
 );
 
+/// An unsigned JWT carrying [claims].
+String _jwt(Map<String, dynamic> claims) =>
+    'e30.${base64Url.encode(utf8.encode(jsonEncode(claims))).replaceAll('=', '')}.sig';
+
+String _tokenWithRealmRoles(List<String> roles) => _jwt({'sub': 'u1', 'realm_access': {'roles': roles}});
+
+/// Serves userinfo and records every request (for the /logout assertion).
+final class FakeUserServer {
+  final requests = <http.Request>[];
+  late final http.Client client = MockClient((request) async {
+    requests.add(request);
+    if (request.url.path.endsWith('/userinfo')) return _json({'sub': 'u1', 'preferred_username': 'alice'});
+    return http.Response('', 204);
+  });
+
+  bool get calledLogout => requests.any((r) => r.url.path.endsWith('/logout'));
+}
+
+oauth2.Client _clientWithToken(String accessToken, http.Client transport) => oauth2.Client(
+  oauth2.Credentials(
+    accessToken,
+    refreshToken: 'valid-refresh',
+    expiration: DateTime.now().add(const Duration(minutes: 5)),
+    tokenEndpoint: Uri.parse('http://localhost/token'),
+  ),
+  httpClient: transport,
+);
+
+ClientConfig _staffOnly() => const ClientConfig(
+  baseUrl: 'http://localhost',
+  realm: 'test',
+  clientId: 'app',
+  requiredRealmRoles: {'staff'},
+);
+
+UserCredentials _storedToken(String accessToken, {bool accessExpired = false}) => UserCredentials(
+  accessToken: accessToken,
+  refreshToken: 'valid-refresh',
+  accessTokenExpiry: accessExpired
+      ? DateTime.now().subtract(const Duration(minutes: 1))
+      : DateTime.now().add(const Duration(minutes: 5)),
+  refreshTokenExpiry: DateTime.now().add(const Duration(days: 30)),
+);
+
 void main() {
   late MockStore store;
 
@@ -669,6 +713,121 @@ void main() {
       await expectLater(client.manageAccount(), throwsUnsupportedError);
       await expectLater(client.getAccountCredentials(), throwsUnsupportedError);
       await expectLater(client.handleWebCallback(Uri.parse('http://localhost/cb')), throwsUnsupportedError);
+
+      client.dispose();
+    });
+  });
+
+  group('required roles', () {
+    KeycloakClient loginClient(ClientConfig config, FakeStore store, oauth2.Client result) {
+      final probe = LoginProbe()..completer.complete(result);
+      return KeycloakClient.withDependencies(
+        clientConfig: config,
+        credentialsStorage: store,
+        desktopLoginStrategy: SlowDesktopStrategy(probe),
+        mobileLoginStrategy: SlowMobileStrategy(probe),
+      );
+    }
+
+    test('a principal holding the roles signs in and they are exposed', () async {
+      final server = FakeUserServer();
+      final client = loginClient(_staffOnly(), FakeStore(), _clientWithToken(_tokenWithRealmRoles(['staff']), server.client));
+
+      await client.login();
+
+      expect(client.authState, AuthState.signedIn);
+      expect(client.roles?.hasRealmRole('staff'), isTrue);
+
+      client.dispose();
+    });
+
+    test('login without a required role throws and leaves nothing behind', () async {
+      final server = FakeUserServer();
+      final store = FakeStore();
+      final client = loginClient(_staffOnly(), store, _clientWithToken(_tokenWithRealmRoles(['user']), server.client));
+
+      await expectLater(
+        client.login(),
+        throwsA(isA<KeycloakAccessDeniedException>().having((e) => e.missing.realm, 'missing.realm', {'staff'})),
+      );
+
+      expect(client.authState, AuthState.signedOut);
+      expect(client.roles, isNull);
+      expect(store.creds, isNull);
+      expect(server.calledLogout, isTrue, reason: 'the Keycloak session was left open');
+
+      client.dispose();
+    });
+
+    test('without requirements a role-less principal signs in', () async {
+      final server = FakeUserServer();
+      final client = loginClient(
+        const ClientConfig(baseUrl: 'http://localhost', realm: 'test', clientId: 'app'),
+        FakeStore(),
+        _clientWithToken(_jwt({'sub': 'u1'}), server.client),
+      );
+
+      await client.login();
+
+      expect(client.authState, AuthState.signedIn);
+      expect(client.roles?.isEmpty, isTrue);
+
+      client.dispose();
+    });
+
+    test('restoring a session without a required role ends as accessDenied', () async {
+      final server = FakeUserServer();
+      final store = FakeStore(creds: _storedToken(_tokenWithRealmRoles(['user'])), user: const UserInfo(id: 'u1'));
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _staffOnly(),
+        credentialsStorage: store,
+        httpClient: server.client,
+      );
+
+      await client.waitForInitialization();
+
+      expect(client.authState, AuthState.accessDenied);
+      expect(store.creds, isNull);
+      expect(server.calledLogout, isTrue);
+
+      client.dispose();
+    });
+
+    test('a refresh that loses a required role ends the session', () async {
+      final server = FakeUserServer();
+      final store = FakeStore(creds: _storedToken(_tokenWithRealmRoles(['staff'])), user: const UserInfo(id: 'u1'));
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _staffOnly(),
+        credentialsStorage: store,
+        httpClient: server.client,
+        tokenRefreshOperation: (_, _) async => _clientWithToken(_tokenWithRealmRoles(['user']), server.client),
+      );
+      await client.waitForInitialization();
+      expect(client.authState, AuthState.signedIn);
+
+      final rotations = <void>[];
+      final sub = client.onTokenRefreshed.listen(rotations.add);
+      store.creds = _storedToken(_tokenWithRealmRoles(['staff']), accessExpired: true);
+      final token = await client.getAuthToken();
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(token, isNull, reason: 'a token without the role was handed out');
+      expect(client.authState, AuthState.accessDenied);
+      expect(client.roles, isNull);
+      expect(rotations, isEmpty);
+
+      await sub.cancel();
+      client.dispose();
+    });
+
+    test('logout clears roles', () async {
+      final server = FakeUserServer();
+      final client = loginClient(_staffOnly(), FakeStore(), _clientWithToken(_tokenWithRealmRoles(['staff']), server.client));
+      await client.login();
+
+      await client.logout();
+
+      expect(client.roles, isNull);
 
       client.dispose();
     });
