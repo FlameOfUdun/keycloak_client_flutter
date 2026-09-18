@@ -578,6 +578,130 @@ void main() {
     });
   });
 
+  group('revokeSession timeout', () {
+    test('a logout POST that never answers gives up after refreshTimeout', () async {
+      when(() => oauthClient.post(any(), body: any(named: 'body')))
+          .thenAnswer((_) => Completer<http.Response>().future);
+
+      final service = _makeService(
+        (_, _) async => oauthClient,
+        refreshTimeout: const Duration(milliseconds: 100),
+      );
+      service.setClient(oauthClient);
+
+      final watch = Stopwatch()..start();
+      await service
+          .revokeSession(
+            logoutEndpoint: Uri.parse('http://localhost/logout'),
+            clientId: 'test-client',
+            refreshToken: 'test-refresh-token',
+          )
+          .timeout(const Duration(seconds: 2), onTimeout: () => fail('revokeSession hung'));
+
+      expect(watch.elapsed, greaterThanOrEqualTo(const Duration(milliseconds: 90)));
+      service.dispose();
+    });
+  });
+
+  group('refresh finishing after its timeout', () {
+    test('closes the client it produced', () async {
+      when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
+      final release = Completer<void>();
+      final late = MockOAuth2Client();
+
+      final service = _makeService((_, _) async {
+        await release.future;
+        return late;
+      }, refreshTimeout: const Duration(milliseconds: 50));
+      service.setClient(oauthClient);
+
+      final result = await service.attemptRefresh();
+      expect(result, isA<RefreshTransientFailure>());
+
+      release.complete();
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      verify(() => late.close()).called(1);
+      verifyNever(() => oauthClient.close());
+      service.dispose();
+    });
+
+    test('never closes the current client when the refresh returns it', () async {
+      // The auth-code refresh (refreshCredentials) returns the same instance.
+      when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
+      final release = Completer<void>();
+
+      final service = _makeService((current, _) async {
+        await release.future;
+        return current;
+      }, refreshTimeout: const Duration(milliseconds: 50));
+      service.setClient(oauthClient);
+
+      await service.attemptRefresh();
+      release.complete();
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      verifyNever(() => oauthClient.close());
+      service.dispose();
+    });
+  });
+
+  group('setClient', () {
+    test('closes the client it replaces', () async {
+      final next = MockOAuth2Client();
+      final service = _makeService((_, _) async => oauthClient);
+
+      service.setClient(oauthClient);
+      service.setClient(next);
+      service.setClient(next);
+
+      verify(() => oauthClient.close()).called(1);
+      verifyNever(() => next.close());
+      service.dispose();
+    });
+
+    test('does not close anything after invalidate()', () async {
+      final next = MockOAuth2Client();
+      final service = _makeService((_, _) async => oauthClient);
+
+      service.setClient(oauthClient);
+      service.invalidate();
+      verify(() => oauthClient.close()).called(1);
+      service.setClient(next);
+
+      verifyNever(() => oauthClient.close());
+      verifyNever(() => next.close());
+      service.dispose();
+    });
+
+    test('a refresh in flight when the client is replaced is discarded', () async {
+      final release = Completer<void>();
+      final refreshed = MockOAuth2Client();
+      final replacement = MockOAuth2Client();
+      when(() => store.setCredentials(any())).thenAnswer((_) async {});
+
+      final service = _makeService((_, _) async {
+        await release.future;
+        return refreshed;
+      });
+      service.setClient(oauthClient);
+
+      final pending = service.attemptRefresh();
+      service.setClient(replacement);
+      release.complete();
+      final result = await pending;
+
+      expect(result, isA<RefreshPermanentFailure>());
+      expect(service.oauthClient, same(replacement));
+      verify(() => oauthClient.close()).called(1);
+      verify(() => refreshed.close()).called(1);
+      verifyNever(() => replacement.close());
+      verifyNever(() => store.setCredentials(any()));
+      expect(permanentCalls, 0);
+      service.dispose();
+    });
+  });
+
   group('permanentAuthErrors', () {
     test('by default invalid_client is transient', () async {
       when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());

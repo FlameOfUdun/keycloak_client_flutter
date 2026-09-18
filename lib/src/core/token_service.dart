@@ -13,6 +13,23 @@ import '../models/user_credentials.dart';
 /// Injectable so tests can simulate server responses without HTTP.
 typedef RefreshOperation = Future<oauth2.Client> Function(oauth2.Client current, List<String> scopes);
 
+/// Applies [timeout] to [pending], a future producing a new OAuth2 client.
+///
+/// A timeout abandons [pending] but not the request behind it: if that later
+/// succeeds, the client it produces is closed, so its connection is not
+/// leaked. [keep] is never closed — the auth-code refresh returns the very
+/// client it was given, which is still in use.
+Future<oauth2.Client> closeIfLate(Future<oauth2.Client> pending, Duration timeout, {oauth2.Client? keep}) =>
+    pending.timeout(
+      timeout,
+      onTimeout: () {
+        pending.then((client) {
+          if (!identical(client, keep)) client.close();
+        }, onError: (_) {}).ignore();
+        throw TimeoutException('Timed out after $timeout.', timeout);
+      },
+    );
+
 /// Owns all transport concerns: OAuth2 client lifetime, token refresh,
 /// retry scheduling, and recovery detection.
 /// Has no knowledge of AuthState or UserInfo.
@@ -68,8 +85,14 @@ final class TokenService {
   oauth2.Client? get oauthClient => _oauthClient;
 
   /// Sets the active OAuth2 client. Called after login or on init with stored credentials.
+  ///
+  /// Closes the client it replaces (routine for a service account: restore,
+  /// then login). A refresh still running on the old client is superseded and
+  /// discards its result.
   void setClient(oauth2.Client client) {
+    final previous = _oauthClient;
     _oauthClient = client;
+    if (previous != null && !identical(previous, client)) previous.close();
   }
 
   /// Cancels the timer and closes the OAuth2 client.
@@ -127,7 +150,7 @@ final class TokenService {
     }
 
     try {
-      final next = await _refreshOperation(previous, _scopes).timeout(_refreshTimeout);
+      final next = await closeIfLate(_refreshOperation(previous, _scopes), _refreshTimeout, keep: previous);
       if (_superseded(previous)) {
         // The identical() guard matters because the auth-code refresh returns
         // the same instance it was given.
@@ -236,7 +259,9 @@ final class TokenService {
       // a null in the map makes it a Map<String, String?>, which http rejects
       // when it casts the body to form fields. That throw lands in the catch
       // below, so a session would silently stop being revoked server-side.
-      await _oauthClient!.post(logoutEndpoint, body: {'client_id': clientId, 'refresh_token': refreshToken, 'id_token_hint': ?idToken});
+      await _oauthClient!
+          .post(logoutEndpoint, body: {'client_id': clientId, 'refresh_token': refreshToken, 'id_token_hint': ?idToken})
+          .timeout(_refreshTimeout);
     } catch (_) {
       // Intentionally swallowed — caller handles fallback
     }

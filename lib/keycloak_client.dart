@@ -76,6 +76,11 @@ final class KeycloakClient {
   /// [refreshToken] can wait for it before reporting the denial.
   Future<void>? _denial;
 
+  /// Set while a denial is ending the session. The store still holds the
+  /// role-less token until the server session is revoked, and [getAuthToken]
+  /// must not hand it out in the meantime.
+  bool _denying = false;
+
   /// Creates a [KeycloakClient] from a single configuration object.
   KeycloakClient({required ClientConfig clientConfig, WebConfig? webConfig, MobileConfig? mobileConfig, DesktopConfig? desktopConfig})
     : _clientConfig = clientConfig,
@@ -189,7 +194,7 @@ final class KeycloakClient {
   /// same exceptions the browser strategies throw.
   Future<Client> _serviceAccountLogin() async {
     try {
-      return await _clientCredentialsGrant().timeout(_clientConfig.refreshTimeout);
+      return await closeIfLate(_clientCredentialsGrant(), _clientConfig.refreshTimeout);
     } on AuthorizationException catch (e) {
       throw KeycloakServerException(400, e.error);
     } on FormatException catch (e) {
@@ -559,6 +564,7 @@ final class KeycloakClient {
   }
 
   Future<void> _endSession(AuthState reason) async {
+    _denying = false;
     _roles = null;
     _tokenService.invalidate();
     await _credentialsStorage.clear();
@@ -595,6 +601,8 @@ final class KeycloakClient {
 
   /// Ends the session at Keycloak and locally, landing in [reason].
   Future<void> _denyAccess(AuthState reason) async {
+    // Set before the first await, so no getAuthToken() slips in between.
+    _denying = true;
     await _revokeServerSession();
     await _endSession(reason);
   }
@@ -672,6 +680,7 @@ final class KeycloakClient {
   /// Returns `null` when no session exists or the session cannot be recovered.
   Future<String?> getAuthToken() async {
     await waitForInitialization();
+    if (_denying) return null;
 
     final stored = await _credentialsStorage.getCredentials();
     if (stored == null) return null;

@@ -31,20 +31,21 @@ final class KeycloakRoles {
     final resourceAccess = claims['resource_access'];
     return KeycloakRoles(
       realm: _roles(claims['realm_access']),
-      client: {
+      client: Map.unmodifiable({
         if (resourceAccess is Map)
           for (final MapEntry(:key, :value) in resourceAccess.entries)
             if (key is String && _roles(value).isNotEmpty) key: _roles(value),
-      },
+      }),
     );
   }
 
-  /// The `roles` list inside a `{ "roles": [...] }` claim, or empty.
+  /// The `roles` list inside a `{ "roles": [...] }` claim, or empty. The set
+  /// is unmodifiable, so [KeycloakRoles.fromAccessToken] cannot be mutated.
   static Set<String> _roles(Object? access) {
     if (access is! Map) return const {};
     final roles = access['roles'];
     if (roles is! List) return const {};
-    return roles.whereType<String>().toSet();
+    return Set.unmodifiable(roles.whereType<String>());
   }
 
   bool hasRealmRole(String role) => realm.contains(role);

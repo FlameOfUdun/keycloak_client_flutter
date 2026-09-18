@@ -118,6 +118,13 @@ final class FakeKeycloak {
   /// When set, the token endpoint waits for this before answering.
   Completer<void>? holdToken;
 
+  /// Builds the access token for the [n]th grant (1-based). Defaults to the
+  /// opaque `sa-token-<n>`.
+  String Function(int n)? accessToken;
+
+  /// The transport handed to the client, with a count of its `close()` calls.
+  late final ClosingClient transport = ClosingClient(client);
+
   late final http.Client client = MockClient((request) async {
     requests.add(request);
     if (request.url.path.endsWith('/token')) {
@@ -125,7 +132,8 @@ final class FakeKeycloak {
       if (holdToken != null) await holdToken!.future;
       if (tokenThrows != null) throw tokenThrows!;
       if (tokenError != null) return _json({'error': tokenError}, 401);
-      return _json({'access_token': 'sa-token-${tokenRequests.length}', 'token_type': 'Bearer', 'expires_in': 300});
+      final n = tokenRequests.length;
+      return _json({'access_token': accessToken?.call(n) ?? 'sa-token-$n', 'token_type': 'Bearer', 'expires_in': 300});
     }
     if (request.url.path.endsWith('/userinfo')) {
       return _json({'sub': 'sa-1', 'preferred_username': 'service-account-backend'});
@@ -134,12 +142,32 @@ final class FakeKeycloak {
   });
 }
 
-ClientConfig _saConfig({String? secret = 's3cret'}) => ClientConfig(
+/// Delegates to [inner], counting `close()` calls. Closing an oauth2.Client
+/// closes its transport, so this tells a test whether a client was released.
+final class ClosingClient extends http.BaseClient {
+  final http.Client inner;
+  var closes = 0;
+  ClosingClient(this.inner);
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) => inner.send(request);
+
+  @override
+  void close() => closes++;
+}
+
+ClientConfig _saConfig({
+  String? secret = 's3cret',
+  Set<String> requiredRealmRoles = const {},
+  Duration refreshTimeout = const Duration(seconds: 15),
+}) => ClientConfig(
   baseUrl: 'http://localhost',
   realm: 'test',
   clientId: 'backend',
   clientSecret: secret,
   grantType: GrantType.clientCredentials,
+  requiredRealmRoles: requiredRealmRoles,
+  refreshTimeout: refreshTimeout,
 );
 
 /// A stored service-account token whose access token has already expired.
@@ -160,9 +188,14 @@ String _tokenWithRealmRoles(List<String> roles) => _jwt({'sub': 'u1', 'realm_acc
 /// Serves userinfo and records every request (for the /logout assertion).
 final class FakeUserServer {
   final requests = <http.Request>[];
+
+  /// When set, /logout waits for this before answering.
+  Completer<void>? holdLogout;
+
   late final http.Client client = MockClient((request) async {
     requests.add(request);
     if (request.url.path.endsWith('/userinfo')) return _json({'sub': 'u1', 'preferred_username': 'alice'});
+    if (request.url.path.endsWith('/logout') && holdLogout != null) await holdLogout!.future;
     return http.Response('', 204);
   });
 
@@ -670,6 +703,24 @@ void main() {
       client.dispose();
     });
 
+    test('a grant that times out but later succeeds has its client closed', () async {
+      final kc = FakeKeycloak()..holdToken = Completer<void>();
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(refreshTimeout: const Duration(milliseconds: 50)),
+        credentialsStorage: FakeStore(),
+        httpClient: kc.transport,
+      );
+
+      await expectLater(client.login(), throwsA(isA<KeycloakTimeoutException>()));
+      kc.holdToken!.complete();
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      expect(kc.transport.closes, 1, reason: 'the late client was leaked');
+      expect(client.authState, AuthState.signedOut);
+
+      client.dispose();
+    });
+
     test('login() maps a socket error to KeycloakNetworkException', () async {
       final kc = FakeKeycloak()..tokenThrows = const SocketException('unreachable');
       final client = KeycloakClient.withDependencies(
@@ -818,6 +869,38 @@ void main() {
       expect(rotations, isEmpty);
 
       await sub.cancel();
+      client.dispose();
+    });
+
+    test('getAuthToken() returns null while a denial is revoking the session', () async {
+      final server = FakeUserServer();
+      final store = FakeStore(creds: _storedToken(_tokenWithRealmRoles(['staff'])), user: const UserInfo(id: 'u1'));
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _staffOnly(),
+        credentialsStorage: store,
+        httpClient: server.client,
+        tokenRefreshOperation: (_, _) async => _clientWithToken(_tokenWithRealmRoles(['user']), server.client),
+      );
+      await client.waitForInitialization();
+      expect(client.authState, AuthState.signedIn);
+
+      server.holdLogout = Completer<void>();
+      store.creds = _storedToken(_tokenWithRealmRoles(['staff']), accessExpired: true);
+      expect(await client.getAuthToken(), isNull);
+      for (var i = 0; i < 400 && !server.calledLogout; i++) {
+        await Future.delayed(const Duration(milliseconds: 5));
+      }
+      expect(server.calledLogout, isTrue);
+      // The refresh stored the role-less token, unexpired, and the logout POST
+      // is still in flight, so the store has not been cleared yet.
+      expect(store.creds, isNotNull);
+
+      expect(await client.getAuthToken(), isNull, reason: 'a token without the role was handed out');
+
+      server.holdLogout!.complete();
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(client.authState, AuthState.accessDenied);
+
       client.dispose();
     });
 

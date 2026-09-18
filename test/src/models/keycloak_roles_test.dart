@@ -27,6 +27,19 @@ void main() {
       expect(roles.isEmpty, isFalse);
     });
 
+    test('the decoded roles cannot be mutated', () {
+      final roles = KeycloakRoles.fromAccessToken(jwt({
+        'realm_access': {'roles': ['staff']},
+        'resource_access': {
+          'my-client': {'roles': ['editor']},
+        },
+      }));
+
+      expect(() => roles.realm.add('admin'), throwsUnsupportedError);
+      expect(() => roles.client['other'] = {'x'}, throwsUnsupportedError);
+      expect(() => roles.client['my-client']!.add('admin'), throwsUnsupportedError);
+    });
+
     test('a token without role claims has no roles', () {
       final roles = KeycloakRoles.fromAccessToken(jwt({'sub': 'u1'}));
 
