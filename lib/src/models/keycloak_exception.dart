@@ -1,3 +1,5 @@
+import 'keycloak_roles.dart';
+
 /// Base class for all exceptions thrown by the Keycloak client.
 abstract class KeycloakException implements Exception {
   /// Human-readable description of the error.
@@ -37,4 +39,13 @@ final class KeycloakSessionExpiredException extends KeycloakException {
 
 final class KeycloakTimeoutException extends KeycloakException {
   const KeycloakTimeoutException(super.message);
+}
+
+/// Thrown by `login()` and `handleWebCallback()` when the principal lacks a
+/// required role. The Keycloak session has already been ended.
+final class KeycloakAccessDeniedException extends KeycloakException {
+  /// The required roles that were not granted.
+  final KeycloakRoles missing;
+
+  KeycloakAccessDeniedException(this.missing) : super('Missing required roles: $missing');
 }

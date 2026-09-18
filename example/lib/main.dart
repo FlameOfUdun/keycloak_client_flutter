@@ -111,6 +111,7 @@ final class _AuthGate extends StatelessWidget {
           AuthState.signedIn => _HomeScreen(client: client),
           AuthState.signedOut => _LoginScreen(client: client),
           AuthState.sessionExpired => _SessionExpiredScreen(client: client),
+          AuthState.accessDenied => _LoginScreen(client: client),
         };
       },
     );
