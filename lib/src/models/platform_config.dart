@@ -20,23 +20,20 @@ sealed class PlatformConfig {
   const PlatformConfig({required this.redirectUri});
 }
 
-/// Mobile-specific configuration options, such as deep link timeout.
+/// Mobile-specific configuration options.
 final class MobileConfig extends PlatformConfig {
-  /// The maximum time to wait for the deep link callback after launching the
-  /// browser for login before giving up and throwing a timeout error. This is
-  /// important to prevent the app from waiting indefinitely if the user abandons
-  /// the login process after the browser is launched.
+  /// Whether the login runs in a private browser session. Defaults to `true`.
   ///
-  /// Default is 5 minutes, which should be more than enough for any user to
-  /// complete the login process, even if they need to reset their password or
-  /// perform multi-factor authentication. You can adjust this timeout based
-  /// on your user base and expected login flow complexity, but it's generally
-  /// not recommended to set it too low to avoid cutting off users who may need more time.
-  final Duration deepLinkTimeout;
+  /// A private session shares no cookies with the system browser: iOS shows no
+  /// "wants to use … to Sign In" prompt, and every login asks for credentials
+  /// (refresh tokens keep users signed in between logins). Set `false` to
+  /// share the browser's Keycloak session for single sign-on, at the cost of
+  /// that prompt on iOS.
+  final bool preferEphemeral;
 
   const MobileConfig({
     super.redirectUri = 'myapp://auth',
-    this.deepLinkTimeout = const Duration(minutes: 5),
+    this.preferEphemeral = true,
   });
 }
 
