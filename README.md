@@ -107,6 +107,7 @@ final client = KeycloakClient(
 - `refreshTokenLifetime`: how long a refresh token is assumed to last — defaults to 30 days. `package:oauth2` drops the server's `refresh_expires_in`, so this is assumed rather than read; set it to match your realm's **SSO Session Max**. Ignored for `offline_access` sessions
 - `refreshTimeout`: HTTP timeout for each token refresh attempt — defaults to `Duration(seconds: 15)`. Lower for faster offline detection; raise for high-latency deployments.
 - `grantType`: `GrantType.authorizationCode` (default, browser login) or `GrantType.clientCredentials` (service account, see below)
+- `requiredRealmRoles` / `requiredClientRoles`: roles the principal must hold, see [Roles](#roles)
 
 Platform config defaults:
 
@@ -154,6 +155,39 @@ for the client.
 
 > **Never ship a client secret in a public mobile, web or desktop build.**
 > Anyone can extract it. Use this mode only on machines you control.
+
+## Roles
+
+`client.roles` exposes the principal's Keycloak roles, read from the access
+token (`realm_access`, `resource_access`). It is `null` while signed out and
+updates on every refresh.
+
+```dart
+client.roles?.hasRealmRole('staff');
+client.roles?.hasClientRole('my-client', 'editor');
+```
+
+To admit only principals with certain roles:
+
+```dart
+ClientConfig(
+  ...,
+  requiredRealmRoles: {'staff'},
+  requiredClientRoles: {'my-client': {'editor'}},
+)
+```
+
+- `login()` without them ends the Keycloak session and throws
+  `KeycloakAccessDeniedException` (`e.missing` lists what was lacking).
+- A restored session without them, or one whose role is revoked while signed
+  in, ends as `AuthState.accessDenied`.
+- `refreshToken()` throws `KeycloakAccessDeniedException` instead if a
+  required role is lost on a refresh it triggered directly.
+
+This is a UX guard. The token's signature isn't checked, and anyone can modify
+an app, so your API must enforce roles itself. To block the login in Keycloak
+itself, add a *Condition – user role* + *Deny access* step to the browser
+flow.
 
 ## Dev Redirect Helper
 
@@ -396,6 +430,7 @@ Always:
 - `reloadUser()`: reload profile data from `/userinfo`
 - `getAccountCredentials()`: list the user's configured authentication methods as a sealed `AccountCredential` family
 - `manageAccount()`: open Keycloak account console in external browser
+- `roles`: the principal's realm and client roles, `null` while signed out
 - `onAuthChange`: stream of `AuthState`
 - `onUserChange`: stream of `UserInfo?`
 - `onTokenRefreshed`: fires after every successful refresh while signed in; does not replay on listen
@@ -406,6 +441,7 @@ Always:
 - `AuthState.signedOut`
 - `AuthState.signedIn`
 - `AuthState.sessionExpired`
+- `AuthState.accessDenied`
 
 ## Exceptions
 
@@ -415,6 +451,7 @@ The package throws typed exceptions:
 - `KeycloakServerException` — a non-2xx response, or an IdP `error` in the login callback other than `access_denied`
 - `KeycloakSessionExpiredException` — thrown by `refreshToken()` when the session is permanently dead and the user must sign in again
 - `KeycloakTimeoutException` — the user never came back from the browser, or a web grant aged past `pendingGrantTTL`
+- `KeycloakAccessDeniedException` — `login()` found the principal lacks a required role; the session was already ended
 
 A cancelled login is not an exception: `login()` and `handleWebCallback()`
 return normally when the IdP reports `access_denied`.

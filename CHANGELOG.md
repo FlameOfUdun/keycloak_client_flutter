@@ -2,6 +2,11 @@
 
 ## 4.0.0
 
+### Breaking
+
+- `AuthState.accessDenied` is a new value. Exhaustive `switch`es over
+  `AuthState` need an arm for it.
+
 ### New
 
 - Service-account mode: `ClientConfig.grantType: GrantType.clientCredentials`
@@ -13,6 +18,12 @@
   `GrantType.authorizationCode`, leaves existing behaviour unchanged.
 - `package:http` is now a direct dependency (it already came in through
   `oauth2`).
+- `KeycloakClient.roles`: realm and client roles from the access token,
+  updated on every refresh.
+- `ClientConfig.requiredRealmRoles` / `requiredClientRoles`: a principal
+  without them is rejected at login with `KeycloakAccessDeniedException`, and a
+  restored or refreshed session without them ends as `AuthState.accessDenied`.
+  The Keycloak session is revoked in both cases.
 
 ### Bug Fixes
 
