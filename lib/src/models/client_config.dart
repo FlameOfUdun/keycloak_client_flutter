@@ -1,4 +1,5 @@
 import '../enums/grant_type.dart';
+import 'keycloak_roles.dart';
 
 /// Configuration for [KeycloakClient]. Contains all necessary information to
 /// interact with the Keycloak server and customize client behavior.
@@ -44,6 +45,16 @@ final class ClientConfig {
   /// browser, and [clientSecret] becomes required.
   final GrantType grantType;
 
+  /// Realm roles the principal must hold. Without all of them, `login()` throws
+  /// `KeycloakAccessDeniedException` and a restored or refreshed session ends
+  /// as `AuthState.accessDenied`. This is a UX guard, not security: APIs must
+  /// enforce roles themselves.
+  final Set<String> requiredRealmRoles;
+
+  /// Client roles the principal must hold, by client ID. Same rules as
+  /// [requiredRealmRoles].
+  final Map<String, Set<String>> requiredClientRoles;
+
   const ClientConfig({
     required this.baseUrl,
     required this.realm,
@@ -53,6 +64,8 @@ final class ClientConfig {
     this.refreshTokenLifetime = const Duration(days: 30),
     this.refreshTimeout = const Duration(seconds: 15),
     this.grantType = GrantType.authorizationCode,
+    this.requiredRealmRoles = const {},
+    this.requiredClientRoles = const {},
   });
 
   /// Whether this session requests a Keycloak offline token.
@@ -63,6 +76,16 @@ final class ClientConfig {
 
   /// Whether this client authenticates as a service account.
   bool get isServiceAccount => grantType == GrantType.clientCredentials;
+
+  /// The required roles [granted] lacks. Empty when all are held.
+  KeycloakRoles missingRoles(KeycloakRoles granted) => KeycloakRoles(
+    realm: requiredRealmRoles.difference(granted.realm),
+    client: {
+      for (final MapEntry(key: clientId, value: roles) in requiredClientRoles.entries)
+        if (roles.difference(granted.client[clientId] ?? const {}) case final missing when missing.isNotEmpty)
+          clientId: missing,
+    },
+  );
 
   /// Constructs the standard Keycloak endpoints based on [baseUrl] and [realm].
   Uri get authorizationEndpoint => Uri.parse('$baseUrl/realms/$realm/protocol/openid-connect/auth');
