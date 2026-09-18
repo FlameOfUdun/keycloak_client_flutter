@@ -721,6 +721,48 @@ void main() {
       client.dispose();
     });
 
+    test('login() without a required role throws and never calls /logout', () async {
+      final kc = FakeKeycloak()..accessToken = (_) => _tokenWithRealmRoles(['user']);
+      final store = FakeStore();
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(requiredRealmRoles: {'staff'}),
+        credentialsStorage: store,
+        httpClient: kc.client,
+      );
+
+      await expectLater(client.login(), throwsA(isA<KeycloakAccessDeniedException>()));
+
+      expect(kc.requests.where((r) => r.url.path.endsWith('/logout')), isEmpty);
+      expect(client.authState, AuthState.signedOut);
+      expect(store.creds, isNull);
+      expect(client.roles, isNull);
+
+      client.dispose();
+    });
+
+    test('a renewal that loses a required role ends as accessDenied', () async {
+      final kc = FakeKeycloak()..accessToken = (n) => _tokenWithRealmRoles(n == 1 ? ['staff'] : ['user']);
+      final store = FakeStore();
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _saConfig(requiredRealmRoles: {'staff'}),
+        credentialsStorage: store,
+        httpClient: kc.client,
+      );
+      await client.login();
+      expect(client.authState, AuthState.signedIn);
+
+      store.creds = _expiredSaCreds();
+      final token = await client.getAuthToken();
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(token, isNull);
+      expect(kc.tokenRequests, hasLength(2));
+      expect(client.authState, AuthState.accessDenied);
+      expect(store.creds, isNull);
+
+      client.dispose();
+    });
+
     test('login() maps a socket error to KeycloakNetworkException', () async {
       final kc = FakeKeycloak()..tokenThrows = const SocketException('unreachable');
       final client = KeycloakClient.withDependencies(
@@ -900,6 +942,29 @@ void main() {
       server.holdLogout!.complete();
       await Future.delayed(const Duration(milliseconds: 50));
       expect(client.authState, AuthState.accessDenied);
+
+      client.dispose();
+    });
+
+    test('an offline start without a required role ends as accessDenied', () async {
+      // The refresh fails transiently, so the stored token is what is judged.
+      final server = FakeUserServer();
+      final store = FakeStore(
+        creds: _storedToken(_tokenWithRealmRoles(['user']), accessExpired: true),
+        user: const UserInfo(id: 'u1'),
+      );
+      final client = KeycloakClient.withDependencies(
+        clientConfig: _staffOnly(),
+        credentialsStorage: store,
+        httpClient: server.client,
+        tokenRefreshOperation: (_, _) async => throw const SocketException('offline'),
+      );
+
+      await client.waitForInitialization();
+
+      expect(client.authState, AuthState.accessDenied);
+      expect(store.creds, isNull);
+      expect(client.roles, isNull);
 
       client.dispose();
     });
