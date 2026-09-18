@@ -389,6 +389,28 @@ Also ensure internet permission exists:
 
 For an `https` redirect (App Links), use `https` as the scheme in the intent
 filter with your host, and set `MobileConfig.redirectUri` to the full URL.
+Add `android:autoVerify="true"` to the intent filter so Android verifies the
+app as the handler for that host, and give the `data` element the host and
+path instead of a custom scheme:
+
+```xml
+<activity
+    android:name="com.linusu.flutter_web_auth_2.CallbackActivity"
+    android:exported="true"
+    android:taskAffinity="">
+    <intent-filter android:autoVerify="true" android:label="flutter_web_auth_2">
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="https" android:host="app.example.com" android:path="/auth/callback"/>
+    </intent-filter>
+</activity>
+```
+
+The host (`app.example.com` above) must serve
+`/.well-known/assetlinks.json` declaring this app, or Android can't verify
+the link: instead of the Auth Tab matching it, the user sees a disambiguation
+chooser, or the redirect never comes back to the app at all.
 
 ## iOS
 
@@ -472,11 +494,12 @@ The package throws typed exceptions:
 - `KeycloakNetworkException` — the server could not be reached, or a browser/listener could not be started. Retryable
 - `KeycloakServerException` — a non-2xx response, or an IdP `error` in the login callback other than `access_denied`
 - `KeycloakSessionExpiredException` — thrown by `refreshToken()` when the session is permanently dead and the user must sign in again
-- `KeycloakTimeoutException` — the user never came back from the browser, or a web grant aged past `pendingGrantTTL`
+- `KeycloakTimeoutException` — desktop only: the user never came back from the browser, or a web grant aged past `pendingGrantTTL`
 - `KeycloakAccessDeniedException` — thrown by `login()`, `handleWebCallback()` and `refreshToken()` when the principal lacks a required role; the session was already ended
 
 A cancelled login is not an exception: `login()` and `handleWebCallback()`
-return normally when the IdP reports `access_denied`.
+return normally when the IdP reports `access_denied`, and `login()` also
+returns normally when a mobile auth session is dismissed.
 
 ## Notes
 

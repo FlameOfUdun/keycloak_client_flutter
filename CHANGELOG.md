@@ -17,7 +17,10 @@
     needed.
 - `MobileConfig.deepLinkTimeout` is removed: the auth session has no timeout,
   and on Android an abandoned login is cancelled when the user returns to the
-  app. `login()` returns `null` on cancellation, as before.
+  app. Dismissing the auth session now makes `login()` return `null`
+  immediately (previously `KeycloakTimeoutException` after
+  `deepLinkTimeout`); mobile login no longer throws
+  `KeycloakTimeoutException`.
 - Requires Flutter 3.24 or later. `app_links` is no longer a dependency.
 - `flutter_web_auth_2` is a single all-platform plugin; its desktop side
   depends on `desktop_webview_window` (+ `window_to_front`), unused by desktop

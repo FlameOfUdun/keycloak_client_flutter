@@ -70,7 +70,7 @@ final class MobileLoginStrategy implements IMobileLoginStrategy {
           // flutter_web_auth_2 needs these to match an https (app / universal
           // link) redirect.
           httpsHost: isHttps ? redirect.host : null,
-          httpsPath: isHttps ? redirect.path : null,
+          httpsPath: isHttps ? (redirect.path.isEmpty ? '/' : redirect.path) : null,
         ),
       );
     } on PlatformException catch (e) {

@@ -96,6 +96,15 @@ void main() {
     expect(session.options!.httpsPath, '/auth/callback');
   });
 
+  test('an https redirect with no path passes httpsPath as /', () async {
+    final session = FakeAuthSession((state) => 'https://app.example.com/?code=abc&state=$state');
+
+    await login(session, const MobileConfig(redirectUri: 'https://app.example.com'));
+
+    expect(session.options!.httpsHost, 'app.example.com');
+    expect(session.options!.httpsPath, '/');
+  });
+
   test('a dismissed session is a cancellation', () async {
     final session = FakeAuthSession((_) => '', throws: PlatformException(code: 'CANCELED'));
 
