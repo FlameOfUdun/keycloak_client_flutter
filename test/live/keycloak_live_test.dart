@@ -12,6 +12,10 @@
 // access grants enabled, and user tester/password123. Skips when nothing is
 // listening on 8080.
 //
+// For the service-account test, also create confidential client
+// `backend-sa` with Client authentication ON, Service accounts roles ON, and
+// client secret `backend-sa-secret`.
+//
 // This file signs sessions out, so it keeps `tester` to itself —
 // desktop_login_live_test.dart runs concurrently under its own user.
 //
@@ -307,6 +311,31 @@ void main() {
     expect(await store.getCredentials(), isNull,
         reason: 'a permanently failed refresh must clear the session');
     print('  [ok] a dead session surfaces as sessionExpired, not silence');
+
+    client.dispose();
+  });
+
+  liveTest('a service account signs in with the client-credentials grant', () async {
+    final client = KeycloakClient.withDependencies(
+      clientConfig: const ClientConfig(
+        baseUrl: _baseUrl,
+        realm: _realm,
+        clientId: 'backend-sa',
+        clientSecret: 'backend-sa-secret',
+        grantType: GrantType.clientCredentials,
+      ),
+      credentialsStorage: MemoryStore(),
+    );
+
+    await client.login();
+
+    expect(client.authState, AuthState.signedIn);
+    expect(client.currentUser?.username, 'service-account-backend-sa');
+    expect(await client.getAuthToken(), isNotEmpty);
+
+    await client.refreshToken(); // a second grant over the wire
+    expect(client.authState, AuthState.signedIn);
+    print('  [ok] service account ${client.currentUser?.username}');
 
     client.dispose();
   });
