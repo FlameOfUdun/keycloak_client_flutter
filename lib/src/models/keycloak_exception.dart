@@ -37,6 +37,12 @@ final class KeycloakSessionExpiredException extends KeycloakException {
   const KeycloakSessionExpiredException() : super('Session has expired');
 }
 
+/// Thrown when the credentials store cannot be read or written — on macOS typically an app that no keychain accepts.
+/// Raised at start-up ([KeycloakClient.initialize]) when no storage works on the device.
+final class KeycloakStorageException extends KeycloakException {
+  const KeycloakStorageException(super.message, {super.cause});
+}
+
 final class KeycloakTimeoutException extends KeycloakException {
   const KeycloakTimeoutException(super.message);
 }

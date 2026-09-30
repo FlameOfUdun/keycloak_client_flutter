@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Unreleased
+
+### Fixed
+
+- macOS: an unsigned or development build, which the data-protection keychain
+  refuses (-34018), now falls back to the login keychain instead of failing
+  sign-in. A Mac where no keychain works fails at start-up with the new
+  `KeycloakStorageException`, not after a successful login.
+- A saved login that can't be read back (made by another build of the app, or
+  no longer parsing) is treated as signed out and removed, rather than failing
+  `initialize`.
+
+### Changed
+
+- In the login keychain, items now go under a per-client service name,
+  `KeycloakClient.storageNamespace(config)`
+  (`keycloak_client:<clientId>@<realm>/<host>`), so apps never share or
+  overwrite each other's saved login. Apps that used the login keychain start
+  signed out once. `SecureStorageAuthCredentialsStore` takes `namespace:` for
+  apps that build their own.
+
 ## 4.0.0
 
 ### Breaking

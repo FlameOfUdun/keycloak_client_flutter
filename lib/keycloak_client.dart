@@ -106,7 +106,7 @@ final class KeycloakClient {
        _desktopConfig = desktopConfig ?? const DesktopConfig(),
        _mobileConfig = mobileConfig ?? const MobileConfig(),
        _webConfig = webConfig ?? const WebConfig(),
-       _credentialsStorage = credentialsStorage ?? const SecureStorageAuthCredentialsStore(),
+       _credentialsStorage = credentialsStorage ?? SecureStorageAuthCredentialsStore(namespace: storageNamespace(clientConfig)),
        _tokenRefreshOperation = null,
        _httpClient = null,
        _loginStrategy = _selectLoginStrategy(
@@ -133,7 +133,7 @@ final class KeycloakClient {
        _desktopConfig = desktopConfig ?? const DesktopConfig(),
        _mobileConfig = mobileConfig ?? const MobileConfig(),
        _webConfig = webConfig ?? const WebConfig(),
-       _credentialsStorage = credentialsStorage ?? const SecureStorageAuthCredentialsStore(),
+       _credentialsStorage = credentialsStorage ?? SecureStorageAuthCredentialsStore(namespace: storageNamespace(clientConfig)),
        _tokenRefreshOperation = tokenRefreshOperation,
        _httpClient = httpClient,
        _loginStrategy = _selectLoginStrategy(
@@ -143,6 +143,12 @@ final class KeycloakClient {
        ) {
     _createInternals();
   }
+
+  /// Where this client's saved login goes in a shared keychain: its client, realm and server, so two apps (or one
+  /// app against two servers) never share or overwrite each other's. An app that makes its own
+  /// [SecureStorageAuthCredentialsStore] (to clear it, say) passes this as its namespace.
+  static String storageNamespace(ClientConfig config) =>
+      'keycloak_client:${config.clientId}@${config.realm}/${Uri.tryParse(config.baseUrl)?.authority ?? config.baseUrl}';
 
   static ILoginStrategy _selectLoginStrategy({
     IDesktopLoginStrategy? desktopOverride,
