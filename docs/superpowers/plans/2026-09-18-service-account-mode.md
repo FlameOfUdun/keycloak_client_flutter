@@ -39,7 +39,7 @@
 - Modify: `lib/keycloak_client.dart` (exports block, near line 26)
 - Test: `test/src/models/client_config_test.dart` (create)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `test/src/models/client_config_test.dart`:
 
@@ -78,12 +78,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run the test and confirm it fails**
+- [x] **Step 2: Run the test and confirm it fails**
 
 Run: `flutter test test/src/models/client_config_test.dart`
 Expected: compile error, `Undefined name 'GrantType'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `lib/src/enums/grant_type.dart`:
 
@@ -133,12 +133,12 @@ In `lib/keycloak_client.dart`, add this to the export block after `export 'src/e
 export 'src/enums/grant_type.dart';
 ```
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 Run: `flutter test test/src/models/client_config_test.dart`
 Expected: 3 tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/src/enums/grant_type.dart lib/src/models/client_config.dart lib/keycloak_client.dart test/src/models/client_config_test.dart
@@ -153,7 +153,7 @@ git commit -m "feat: add ClientConfig.grantType"
 - Modify: `lib/src/core/token_service.dart` (fields, constructor, and the `on oauth2.AuthorizationException` clause in `_doRefresh`)
 - Test: `test/src/core/token_service_test.dart`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `test/src/core/token_service_test.dart`, extend the `_makeService` helper with one named parameter and pass it through:
 
@@ -215,12 +215,12 @@ Add a new group at the end of `main()`:
   });
 ```
 
-- [ ] **Step 2: Run the tests and confirm they fail**
+- [x] **Step 2: Run the tests and confirm they fail**
 
 Run: `flutter test test/src/core/token_service_test.dart`
 Expected: compile error, `No named parameter with the name 'permanentAuthErrors'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `lib/src/core/token_service.dart`, add this field after `final bool _isOfflineSession;`:
 
@@ -256,12 +256,12 @@ Replace the `on oauth2.AuthorizationException` clause in `_doRefresh` with:
       return await _handleTransientFailure(e);
 ```
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 Run: `flutter test test/src/core/token_service_test.dart`
 Expected: all pass, including the existing `invalid_grant` test.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/src/core/token_service.dart test/src/core/token_service_test.dart
@@ -277,7 +277,7 @@ git commit -m "feat: let TokenService treat more auth errors as permanent"
 - Modify: `lib/keycloak_client.dart`
 - Test: `test/keycloak_client_test.dart`
 
-- [ ] **Step 1: Move `http` to `dependencies`**
+- [x] **Step 1: Move `http` to `dependencies`**
 
 In `pubspec.yaml`, delete `  http: ^1.6.0` from `dev_dependencies` and add it under `dependencies` after `oauth2: ^2.0.5`:
 
@@ -288,7 +288,7 @@ In `pubspec.yaml`, delete `  http: ^1.6.0` from `dev_dependencies` and add it un
 Run: `flutter pub get`
 Expected: `Got dependencies!`
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 In `test/keycloak_client_test.dart`, add these imports:
 
@@ -485,12 +485,12 @@ Add this group at the end of `main()`:
   });
 ```
 
-- [ ] **Step 3: Run the tests and confirm they fail**
+- [x] **Step 3: Run the tests and confirm they fail**
 
 Run: `flutter test test/keycloak_client_test.dart`
 Expected: compile error, `No named parameter with the name 'httpClient'`.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 All edits below are in `lib/keycloak_client.dart`.
 
@@ -629,17 +629,17 @@ Also change the log line above it to:
       isOfflineToken: _noLocalRefreshExpiry,
 ```
 
-- [ ] **Step 5: Run the tests and confirm they pass**
+- [x] **Step 5: Run the tests and confirm they pass**
 
 Run: `flutter test test/keycloak_client_test.dart`
 Expected: all pass, the original 9 plus 7 new ones.
 
-- [ ] **Step 6: Run the whole unit suite**
+- [x] **Step 6: Run the whole unit suite**
 
 Run: `flutter test test/keycloak_client_test.dart test/src`
 Expected: all pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add pubspec.yaml pubspec.lock lib/keycloak_client.dart test/keycloak_client_test.dart
@@ -654,7 +654,7 @@ git commit -m "feat: service-account login via the client-credentials grant"
 - Modify: `lib/keycloak_client.dart` (`getAccountCredentials`, `manageAccount`, `handleWebCallback`, `logout`)
 - Test: `test/keycloak_client_test.dart` (the `service account mode` group)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add these to the `service account mode` group:
 
@@ -694,12 +694,12 @@ Add these to the `service account mode` group:
     });
 ```
 
-- [ ] **Step 2: Run the tests and confirm they fail**
+- [x] **Step 2: Run the tests and confirm they fail**
 
 Run: `flutter test test/keycloak_client_test.dart --plain-name "service account mode"`
 Expected: 2 failures. `logout` posts to `/logout`. `handleWebCallback` throws `StateError`. The other two throw something other than `UnsupportedError`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add this helper next to `_assertNotDisposed()`:
 
@@ -723,12 +723,12 @@ In `logout()`, change `if (stored != null) {` to:
     if (stored != null && !_clientConfig.isServiceAccount) {
 ```
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 Run: `flutter test test/keycloak_client_test.dart test/src`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/keycloak_client.dart test/keycloak_client_test.dart
@@ -742,7 +742,7 @@ git commit -m "feat: service-account logout and unsupported user-only methods"
 **Files:**
 - Modify: `test/live/keycloak_live_test.dart` (header comment and one new `liveTest`)
 
-- [ ] **Step 1: Add the test**
+- [x] **Step 1: Add the test**
 
 Extend the setup paragraph in the header comment with:
 
@@ -781,12 +781,12 @@ Add this at the end of `main()`:
   });
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `flutter test test/live/keycloak_live_test.dart --plain-name "service account"`
 Expected: passes when the Keycloak container and the `backend-sa` client exist. Otherwise it's reported as skipped. Record which one happened; don't claim a pass if it was skipped.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add test/live/keycloak_live_test.dart
@@ -802,7 +802,7 @@ git commit -m "test: service-account login against a real Keycloak"
 - Modify: `CHANGELOG.md`
 - Modify: `pubspec.yaml` (`version:`)
 
-- [ ] **Step 1: README field list**
+- [x] **Step 1: README field list**
 
 In the `ClientConfig` fields list, change the `clientSecret` bullet and add a `grantType` bullet after `refreshTimeout`:
 
@@ -811,7 +811,7 @@ In the `ClientConfig` fields list, change the `clientSecret` bullet and add a `g
 - `grantType`: `GrantType.authorizationCode` (default, browser login) or `GrantType.clientCredentials` (service account, see below)
 ```
 
-- [ ] **Step 2: README section**
+- [x] **Step 2: README section**
 
 Insert this before `## Dev Redirect Helper`:
 
@@ -852,7 +852,7 @@ for the client.
 > Anyone can extract it. Use this mode only on machines you control.
 ````
 
-- [ ] **Step 3: CHANGELOG and version**
+- [x] **Step 3: CHANGELOG and version**
 
 Add this at the top of `CHANGELOG.md`, under `# CHANGELOG`:
 
@@ -874,12 +874,12 @@ Add this at the top of `CHANGELOG.md`, under `# CHANGELOG`:
 
 In `pubspec.yaml`, change `version: 3.0.0` to `version: 4.0.0`. This release also carries the required-roles work (`2026-09-18-required-roles.md`), which adds to this same CHANGELOG entry. There is no separate 3.x release.
 
-- [ ] **Step 4: Analyze and run the full suite**
+- [x] **Step 4: Analyze and run the full suite**
 
 Run: `flutter analyze && flutter test test/keycloak_client_test.dart test/src`
 Expected: `No issues found!`, and all tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add README.md CHANGELOG.md pubspec.yaml

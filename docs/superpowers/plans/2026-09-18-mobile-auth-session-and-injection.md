@@ -44,7 +44,7 @@
 - Modify: `lib/src/utilities/pkce.dart` (doc comment)
 - Test: `test/public_api_test.dart` (create)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `test/public_api_test.dart`:
 
@@ -71,12 +71,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run the test and confirm it fails**
+- [x] **Step 2: Run the test and confirm it fails**
 
 Run: `flutter test test/public_api_test.dart`
 Expected: compile errors, `Undefined name 'SecureStorageAuthCredentialsStore'` and `generateCodeVerifier`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `lib/keycloak_client.dart`, add these after `export 'src/models/pending_grant.dart';`:
 
@@ -99,12 +99,12 @@ In `lib/src/utilities/pkce.dart`, add this library doc comment above `import 'da
 library;
 ```
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 Run: `flutter test test/public_api_test.dart`
 Expected: 2 tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/keycloak_client.dart lib/src/utilities/pkce.dart test/public_api_test.dart
@@ -119,7 +119,7 @@ git commit -m "feat: export the default credentials store and PKCE helpers"
 - Modify: `lib/keycloak_client.dart` (both constructors)
 - Test: `test/keycloak_client_test.dart`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add this group at the end of `main()` in `test/keycloak_client_test.dart`. It reuses the existing `LoginProbe`, `SlowMobileStrategy`, `SlowDesktopStrategy`, `FakeStore` and `_creds` helpers.
 
@@ -156,12 +156,12 @@ Add this group at the end of `main()` in `test/keycloak_client_test.dart`. It re
   });
 ```
 
-- [ ] **Step 2: Run the tests and confirm they fail**
+- [x] **Step 2: Run the tests and confirm they fail**
 
 Run: `flutter test test/keycloak_client_test.dart --plain-name "public constructor"`
 Expected: compile error, `No named parameter with the name 'credentialsStorage'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `lib/keycloak_client.dart`, replace the public constructor, meaning its doc comment through the closing `}` of `_createInternals();`, with:
 
@@ -203,12 +203,12 @@ In `KeycloakClient.withDependencies`, change `required IAuthCredentialsStore cre
        _credentialsStorage = credentialsStorage ?? const SecureStorageAuthCredentialsStore(),
 ```
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 Run: `flutter test test/keycloak_client_test.dart test/src test/public_api_test.dart`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/keycloak_client.dart test/keycloak_client_test.dart
@@ -225,7 +225,7 @@ git commit -m "feat: inject the login strategy and credentials store publicly"
 - Rewrite: `lib/src/strategies/mobile_login_strategy.dart`
 - Test: `test/src/strategies/mobile_login_strategy_test.dart` (create)
 
-- [ ] **Step 1: Dependencies**
+- [x] **Step 1: Dependencies**
 
 In `pubspec.yaml`:
 - under `environment:`, change `flutter: ">=1.17.0"` to `flutter: ">=3.24.0"`;
@@ -234,7 +234,7 @@ In `pubspec.yaml`:
 Run: `flutter pub get`
 Expected: `Got dependencies!`
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Create `test/src/strategies/mobile_login_strategy_test.dart`:
 
@@ -371,12 +371,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 3: Run the tests and confirm they fail**
+- [x] **Step 3: Run the tests and confirm they fail**
 
 Run: `flutter test test/src/strategies/mobile_login_strategy_test.dart`
 Expected: compile errors: `withAuthenticator` isn't defined, and there's no named parameter `preferEphemeral`.
 
-- [ ] **Step 4: Implement `MobileConfig`**
+- [x] **Step 4: Implement `MobileConfig`**
 
 In `lib/src/models/platform_config.dart`, replace the whole `MobileConfig` class with:
 
@@ -399,7 +399,7 @@ final class MobileConfig extends PlatformConfig {
 }
 ```
 
-- [ ] **Step 5: Implement the strategy**
+- [x] **Step 5: Implement the strategy**
 
 Replace the whole of `lib/src/strategies/mobile_login_strategy.dart` with:
 
@@ -506,24 +506,24 @@ final class MobileLoginStrategy implements IMobileLoginStrategy {
 }
 ```
 
-- [ ] **Step 6: Run the tests and confirm they pass**
+- [x] **Step 6: Run the tests and confirm they pass**
 
 Run: `flutter test test/src/strategies/mobile_login_strategy_test.dart`
 Expected: 9 tests pass.
 
 If the foreign-state test fails because oauth2 throws something other than `AuthorizationException` or `FormatException` for a state mismatch, map that exception type to `KeycloakServerException` as well. Report it as a deviation.
 
-- [ ] **Step 7: Run everything**
+- [x] **Step 7: Run everything**
 
 Run: `flutter test test/keycloak_client_test.dart test/src test/public_api_test.dart` and `flutter analyze`
 Expected: everything passes, with no new analyzer issues. Confirm with `git grep -n "app_links\|deepLinkTimeout" -- lib test example/lib` that neither name is still referenced.
 
-- [ ] **Step 8: Build check**
+- [x] **Step 8: Build check**
 
 Run in `example/`: `flutter build apk --debug`
 Expected: a successful build, which validates the merged manifest and compileSdk. If no Android SDK is available, report the build as skipped; don't claim it passed. Task 4 changes the example manifest, so run this build again there.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add pubspec.yaml pubspec.lock lib/src/models/platform_config.dart lib/src/strategies/mobile_login_strategy.dart test/src/strategies/mobile_login_strategy_test.dart
@@ -542,7 +542,7 @@ git commit -m "feat: mobile login in an in-app auth session (flutter_web_auth_2)
 - Modify: `README.md` (Configuration, `## Android`, `## iOS`, a new section, Main API, Notes)
 - Modify: `CHANGELOG.md` (the existing 4.0.0 entry)
 
-- [ ] **Step 1: Example Android manifest**
+- [x] **Step 1: Example Android manifest**
 
 In `example/android/app/src/main/AndroidManifest.xml`:
 - delete the second `<intent-filter>` of `MainActivity`, the one with `VIEW` and `<data android:scheme="myapp" android:host="auth"/>`;
@@ -564,11 +564,11 @@ In `example/android/app/src/main/AndroidManifest.xml`:
         </activity>
 ```
 
-- [ ] **Step 2: Example iOS `Info.plist`**
+- [x] **Step 2: Example iOS `Info.plist`**
 
 In `example/ios/Runner/Info.plist`, delete the `CFBundleURLTypes` key and the whole `<array>` that follows it. `ASWebAuthenticationSession` matches the scheme itself.
 
-- [ ] **Step 3: README**
+- [x] **Step 3: README**
 
 - **`## Configuration`, "Platform config defaults":** replace the `MobileConfig.redirectUri` bullet with:
   ```markdown
@@ -646,7 +646,7 @@ In `example/ios/Runner/Info.plist`, delete the `CFBundleURLTypes` key and the wh
   - Credentials are stored with `flutter_secure_storage` by default (`SecureStorageAuthCredentialsStore`); pass `credentialsStorage` to change it
   ```
 
-- [ ] **Step 4: CHANGELOG**
+- [x] **Step 4: CHANGELOG**
 
 In the existing `## 4.0.0` entry, don't add a new heading. Append these to the end of `### Breaking`:
 
@@ -678,12 +678,12 @@ Append these to the end of `### New`:
   `generateState()` are exported.
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run: `flutter analyze`, then `flutter test test/keycloak_client_test.dart test/src test/public_api_test.dart`, then in `example/` `flutter build apk --debug` (or report it as skipped).
 Expected: no new analyzer issues, all tests pass, and the build succeeds.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add example/android/app/src/main/AndroidManifest.xml example/ios/Runner/Info.plist README.md CHANGELOG.md

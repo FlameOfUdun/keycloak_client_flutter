@@ -38,7 +38,7 @@
 - Modify: `lib/keycloak_client.dart` (export block)
 - Test: `test/src/models/keycloak_roles_test.dart` (create)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `test/src/models/keycloak_roles_test.dart`:
 
@@ -97,12 +97,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run the test and confirm it fails**
+- [x] **Step 2: Run the test and confirm it fails**
 
 Run: `flutter test test/src/models/keycloak_roles_test.dart`
 Expected: compile error, `Undefined name 'KeycloakRoles'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `lib/src/models/keycloak_roles.dart`:
 
@@ -174,12 +174,12 @@ In `lib/keycloak_client.dart`, add this to the export block:
 export 'src/models/keycloak_roles.dart';
 ```
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 Run: `flutter test test/src/models/keycloak_roles_test.dart`
 Expected: 4 tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/src/models/keycloak_roles.dart lib/keycloak_client.dart test/src/models/keycloak_roles_test.dart
@@ -194,7 +194,7 @@ git commit -m "feat: add KeycloakRoles, decoded from the access token"
 - Modify: `lib/src/models/client_config.dart`
 - Test: `test/src/models/client_config_test.dart`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add this group to `main()` in `test/src/models/client_config_test.dart`:
 
@@ -240,12 +240,12 @@ Add this group to `main()` in `test/src/models/client_config_test.dart`:
   });
 ```
 
-- [ ] **Step 2: Run the tests and confirm they fail**
+- [x] **Step 2: Run the tests and confirm they fail**
 
 Run: `flutter test test/src/models/client_config_test.dart`
 Expected: compile error, `No named parameter with the name 'requiredRealmRoles'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `lib/src/models/client_config.dart`, add this import:
 
@@ -288,12 +288,12 @@ Add this method after `isServiceAccount`:
   );
 ```
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 Run: `flutter test test/src/models/client_config_test.dart`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/src/models/client_config.dart test/src/models/client_config_test.dart
@@ -309,7 +309,7 @@ git commit -m "feat: add required roles to ClientConfig"
 - Modify: `lib/src/models/keycloak_exception.dart`
 - Modify: `example/lib/main.dart:109-114`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 In `lib/src/enums/auth_state.dart`, replace `sessionExpired;` with:
 
@@ -353,12 +353,12 @@ In `example/lib/main.dart`, add this arm to the `AuthState` switch after the `se
           AuthState.accessDenied => _LoginScreen(client: client),
 ```
 
-- [ ] **Step 2: Analyze**
+- [x] **Step 2: Analyze**
 
 Run: `flutter analyze`
 Expected: `No issues found!`. Without the example arm, analysis reports a non-exhaustive switch.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add lib/src/enums/auth_state.dart lib/src/models/keycloak_exception.dart example/lib/main.dart
@@ -373,7 +373,7 @@ git commit -m "feat: add AuthState.accessDenied and KeycloakAccessDeniedExceptio
 - Modify: `lib/keycloak_client.dart`
 - Test: `test/keycloak_client_test.dart`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `test/keycloak_client_test.dart`, add these helpers above `main()`. They reuse `_json` from the service-account plan, and `dart:convert` is already imported there.
 
@@ -542,12 +542,12 @@ Add this group at the end of `main()`:
   });
 ```
 
-- [ ] **Step 2: Run the tests and confirm they fail**
+- [x] **Step 2: Run the tests and confirm they fail**
 
 Run: `flutter test test/keycloak_client_test.dart --plain-name "required roles"`
 Expected: compile error, `The getter 'roles' isn't defined`.
 
-- [ ] **Step 3: Implement: state, helpers and the `roles` getter**
+- [x] **Step 3: Implement: state, helpers and the `roles` getter**
 
 In `lib/keycloak_client.dart`, add this import:
 
@@ -624,7 +624,7 @@ Replace the body of `logout()` from `final stored = ...` through the closing bra
     await _revokeServerSession();
 ```
 
-- [ ] **Step 4: Implement: the check at login**
+- [x] **Step 4: Implement: the check at login**
 
 In `_finalizeLogin`, insert this directly after `await _credentialsStorage.setCredentials(credentials);`:
 
@@ -638,7 +638,7 @@ In `_finalizeLogin`, insert this directly after `await _credentialsStorage.setCr
     }
 ```
 
-- [ ] **Step 5: Implement: the check at restore**
+- [x] **Step 5: Implement: the check at restore**
 
 In `initialize()`, in the `if (stored.isAccessExpired) { ... }` branch, replace:
 
@@ -667,7 +667,7 @@ In the `else` branch, insert this as its first line, before `_sessionManager.beg
             }
 ```
 
-- [ ] **Step 6: Implement: the check on refresh**
+- [x] **Step 6: Implement: the check on refresh**
 
 Replace `_handleTokenRefreshed` with:
 
@@ -703,12 +703,12 @@ In `refreshToken()`, replace the `RefreshSuccess` case with:
         _reloadUser().ignore();
 ```
 
-- [ ] **Step 7: Run the tests and confirm they pass**
+- [x] **Step 7: Run the tests and confirm they pass**
 
 Run: `flutter test test/keycloak_client_test.dart test/src`
 Expected: all pass, including every earlier test.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add lib/keycloak_client.dart test/keycloak_client_test.dart
@@ -722,7 +722,7 @@ git commit -m "feat: expose roles and enforce required roles"
 **Files:**
 - Modify: `README.md`, `CHANGELOG.md`
 
-- [ ] **Step 1: README**
+- [x] **Step 1: README**
 
 In the `ClientConfig` fields list, add these after `grantType`:
 
@@ -777,7 +777,7 @@ In `## Main API`, add:
 - `roles`: the principal's realm and client roles, `null` while signed out
 ```
 
-- [ ] **Step 2: CHANGELOG and version**
+- [x] **Step 2: CHANGELOG and version**
 
 The service-account plan already created the `## 4.0.0` entry and set
 `version: 4.0.0` in `pubspec.yaml`. Both features ship in this one release, so
@@ -803,12 +803,12 @@ Then append these bullets to the end of that entry's `### New` list:
   The Keycloak session is revoked in both cases.
 ```
 
-- [ ] **Step 3: Analyze and run the full suite**
+- [x] **Step 3: Analyze and run the full suite**
 
 Run: `flutter analyze && flutter test test/keycloak_client_test.dart test/src`
 Expected: `No issues found!`, and all tests pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md CHANGELOG.md
