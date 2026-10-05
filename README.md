@@ -15,7 +15,7 @@ Cross-platform Keycloak authentication for Flutter with:
 
 ```yaml
 dependencies:
-  keycloak_client: ^2.1.0
+  keycloak_client: ^4.1.0
 ```
 
 ## Quick Start
