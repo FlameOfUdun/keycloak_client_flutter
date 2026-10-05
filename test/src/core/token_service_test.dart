@@ -59,7 +59,7 @@ void main() {
     refreshedCalls = 0;
   });
 
-  TokenService _makeService(
+  TokenService makeService(
     Future<oauth2.Client> Function(oauth2.Client, List<String>) refreshOp, {
     Duration refreshTimeout = const Duration(seconds: 15),
     Duration refreshTokenLifetime = const Duration(days: 30),
@@ -87,7 +87,7 @@ void main() {
       when(() => oauthClient.credentials).thenReturn(_oauth2Creds(newCreds));
       when(() => store.setCredentials(any())).thenAnswer((_) async {});
 
-      final service = _makeService((_, __) async => oauthClient);
+      final service = makeService((_, _) async => oauthClient);
       service.setClient(oauthClient);
 
       final result = await service.attemptRefresh();
@@ -102,7 +102,7 @@ void main() {
       when(() => oauthClient.credentials).thenReturn(_oauth2Creds(newCreds));
       when(() => store.setCredentials(any())).thenAnswer((_) async {});
 
-      final service = _makeService((_, __) async => oauthClient);
+      final service = makeService((_, _) async => oauthClient);
       service.setClient(oauthClient);
 
       await service.attemptRefresh();
@@ -120,8 +120,8 @@ void main() {
           () => store.getCredentials(),
         ).thenAnswer((_) async => _validCreds());
 
-        final service = _makeService(
-          (_, __) async => throw const SocketException('offline'),
+        final service = makeService(
+          (_, _) async => throw const SocketException('offline'),
         );
         service.setClient(oauthClient);
 
@@ -139,8 +139,8 @@ void main() {
           () => store.getCredentials(),
         ).thenAnswer((_) async => _expiredRefreshCreds());
 
-        final service = _makeService(
-          (_, __) async => throw const SocketException('offline'),
+        final service = makeService(
+          (_, _) async => throw const SocketException('offline'),
         );
         service.setClient(oauthClient);
 
@@ -160,8 +160,8 @@ void main() {
           () => store.getCredentials(),
         ).thenAnswer((_) async => _validCreds());
 
-        final service = _makeService(
-          (_, __) async =>
+        final service = makeService(
+          (_, _) async =>
               throw oauth2.AuthorizationException('server_error', null, null),
         );
         service.setClient(oauthClient);
@@ -180,8 +180,8 @@ void main() {
           () => store.getCredentials(),
         ).thenAnswer((_) async => _expiredRefreshCreds());
 
-        final service = _makeService(
-          (_, __) async =>
+        final service = makeService(
+          (_, _) async =>
               throw oauth2.AuthorizationException('server_error', null, null),
         );
         service.setClient(oauthClient);
@@ -198,8 +198,8 @@ void main() {
     test(
       'invalid_grant calls onPermanentFailure and returns RefreshPermanentFailure',
       () async {
-        final service = _makeService(
-          (_, __) async =>
+        final service = makeService(
+          (_, _) async =>
               throw oauth2.AuthorizationException('invalid_grant', null, null),
         );
         service.setClient(oauthClient);
@@ -215,8 +215,8 @@ void main() {
       'ExpirationException calls onPermanentFailure and returns RefreshPermanentFailure',
       () async {
         final expiredOauthCreds = _oauth2Creds(_validCreds());
-        final service = _makeService(
-          (_, __) async => throw oauth2.ExpirationException(expiredOauthCreds),
+        final service = makeService(
+          (_, _) async => throw oauth2.ExpirationException(expiredOauthCreds),
         );
         service.setClient(oauthClient);
 
@@ -230,7 +230,7 @@ void main() {
     test(
       'null client calls onPermanentFailure and returns RefreshPermanentFailure',
       () async {
-        final service = _makeService((_, __) async => oauthClient);
+        final service = makeService((_, _) async => oauthClient);
         // Do NOT call service.setClient — _oauthClient remains null
 
         final result = await service.attemptRefresh();
@@ -250,7 +250,7 @@ void main() {
           () => store.getCredentials(),
         ).thenAnswer((_) async => _validCreds());
 
-        final service = _makeService((_, __) async {
+        final service = makeService((_, _) async {
           callCount++;
           throw const SocketException('offline');
         });
@@ -281,7 +281,7 @@ void main() {
         when(() => oauthClient.credentials).thenReturn(_oauth2Creds(newCreds));
         when(() => store.setCredentials(any())).thenAnswer((_) async {});
 
-        final service = _makeService((_, __) async {
+        final service = makeService((_, _) async {
           if (shouldFail) throw const SocketException('offline');
           return oauthClient;
         });
@@ -306,7 +306,7 @@ void main() {
       when(() => oauthClient.credentials).thenReturn(_oauth2Creds(newCreds));
       when(() => store.setCredentials(any())).thenAnswer((_) async {});
 
-      final service = _makeService((_, __) async => oauthClient);
+      final service = makeService((_, _) async => oauthClient);
       service.setClient(oauthClient);
 
       await service.attemptRefresh();
@@ -320,8 +320,8 @@ void main() {
     test('hanging refresh returns RefreshTransientFailure', () async {
       when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
 
-      final service = _makeService(
-        (_, __) => Completer<oauth2.Client>().future, // never resolves
+      final service = makeService(
+        (_, _) => Completer<oauth2.Client>().future, // never resolves
         refreshTimeout: const Duration(milliseconds: 100),
       );
       service.setClient(oauthClient);
@@ -340,8 +340,8 @@ void main() {
           () => store.getCredentials(),
         ).thenAnswer((_) async => _expiredRefreshCreds());
 
-        final service = _makeService(
-          (_, __) => Completer<oauth2.Client>().future,
+        final service = makeService(
+          (_, _) => Completer<oauth2.Client>().future,
           refreshTimeout: const Duration(milliseconds: 100),
         );
         service.setClient(oauthClient);
@@ -367,8 +367,8 @@ void main() {
         written = invocation.positionalArguments.first as UserCredentials;
       });
 
-      final service = _makeService(
-        (_, __) async => oauthClient,
+      final service = makeService(
+        (_, _) async => oauthClient,
         isOfflineSession: isOfflineSession,
         refreshTokenLifetime: refreshTokenLifetime,
       );
@@ -415,7 +415,7 @@ void main() {
       when(() => oauthClient.credentials).thenReturn(_oauth2Creds(_validCreds()));
       when(() => store.setCredentials(any())).thenAnswer((_) async {});
 
-      final service = _makeService((_, __) async => oauthClient);
+      final service = makeService((_, _) async => oauthClient);
       service.setClient(oauthClient);
 
       await service.attemptRefresh();
@@ -429,8 +429,8 @@ void main() {
       // re-dial — and the retry is already scheduled.
       when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
 
-      final service = _makeService(
-        (_, __) async => throw const SocketException('offline'),
+      final service = makeService(
+        (_, _) async => throw const SocketException('offline'),
       );
       service.setClient(oauthClient);
 
@@ -442,8 +442,8 @@ void main() {
     });
 
     test('stays silent on a permanent failure', () async {
-      final service = _makeService(
-        (_, __) async =>
+      final service = makeService(
+        (_, _) async =>
             throw oauth2.AuthorizationException('invalid_grant', null, null),
       );
       service.setClient(oauthClient);
@@ -467,7 +467,7 @@ void main() {
         return http.Response('', 204);
       });
 
-      final service = _makeService((_, __) async => oauthClient);
+      final service = makeService((_, _) async => oauthClient);
       service.setClient(oauthClient);
       await service.revokeSession(
         logoutEndpoint: Uri.parse('http://localhost/logout'),
@@ -507,7 +507,7 @@ void main() {
       when(() => next.credentials).thenReturn(_oauth2Creds(_validCreds()));
       when(() => store.setCredentials(any())).thenAnswer((_) async {});
 
-      final service = _makeService((_, _) async {
+      final service = makeService((_, _) async {
         await release.future;
         return next;
       });
@@ -529,7 +529,7 @@ void main() {
   group('refresh failing after invalidate()', () {
     test('a transport error is dropped without ending the session again', () async {
       late final TokenService service;
-      service = _makeService((_, _) async {
+      service = makeService((_, _) async {
         service.invalidate();
         throw http.ClientException('closed');
       });
@@ -546,7 +546,7 @@ void main() {
 
     test('a permanent auth error is dropped without ending the session again', () async {
       late final TokenService service;
-      service = _makeService((_, _) async {
+      service = makeService((_, _) async {
         service.invalidate();
         throw oauth2.AuthorizationException('invalid_grant', null, null);
       });
@@ -563,7 +563,7 @@ void main() {
   group('transient failure — FormatException', () {
     test('returns RefreshTransientFailure and schedules a retry', () async {
       when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
-      final service = _makeService(
+      final service = makeService(
         (_, _) async => throw const FormatException('bad 502 body'),
       );
       service.setClient(oauthClient);
@@ -583,7 +583,7 @@ void main() {
       when(() => oauthClient.post(any(), body: any(named: 'body')))
           .thenAnswer((_) => Completer<http.Response>().future);
 
-      final service = _makeService(
+      final service = makeService(
         (_, _) async => oauthClient,
         refreshTimeout: const Duration(milliseconds: 100),
       );
@@ -609,7 +609,7 @@ void main() {
       final release = Completer<void>();
       final late = MockOAuth2Client();
 
-      final service = _makeService((_, _) async {
+      final service = makeService((_, _) async {
         await release.future;
         return late;
       }, refreshTimeout: const Duration(milliseconds: 50));
@@ -631,7 +631,7 @@ void main() {
       when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
       final release = Completer<void>();
 
-      final service = _makeService((current, _) async {
+      final service = makeService((current, _) async {
         await release.future;
         return current;
       }, refreshTimeout: const Duration(milliseconds: 50));
@@ -649,7 +649,7 @@ void main() {
   group('setClient', () {
     test('closes the client it replaces', () async {
       final next = MockOAuth2Client();
-      final service = _makeService((_, _) async => oauthClient);
+      final service = makeService((_, _) async => oauthClient);
 
       service.setClient(oauthClient);
       service.setClient(next);
@@ -662,7 +662,7 @@ void main() {
 
     test('does not close anything after invalidate()', () async {
       final next = MockOAuth2Client();
-      final service = _makeService((_, _) async => oauthClient);
+      final service = makeService((_, _) async => oauthClient);
 
       service.setClient(oauthClient);
       service.invalidate();
@@ -680,7 +680,7 @@ void main() {
       final replacement = MockOAuth2Client();
       when(() => store.setCredentials(any())).thenAnswer((_) async {});
 
-      final service = _makeService((_, _) async {
+      final service = makeService((_, _) async {
         await release.future;
         return refreshed;
       });
@@ -705,8 +705,8 @@ void main() {
   group('permanentAuthErrors', () {
     test('by default invalid_client is transient', () async {
       when(() => store.getCredentials()).thenAnswer((_) async => _validCreds());
-      final service = _makeService(
-        (_, __) async => throw oauth2.AuthorizationException('invalid_client', null, null),
+      final service = makeService(
+        (_, _) async => throw oauth2.AuthorizationException('invalid_client', null, null),
       );
       service.setClient(oauthClient);
 
@@ -718,8 +718,8 @@ void main() {
     });
 
     test('a listed error ends the session without retrying', () async {
-      final service = _makeService(
-        (_, __) async => throw oauth2.AuthorizationException('invalid_client', null, null),
+      final service = makeService(
+        (_, _) async => throw oauth2.AuthorizationException('invalid_client', null, null),
         permanentAuthErrors: const {'invalid_grant', 'invalid_client'},
       );
       service.setClient(oauthClient);
